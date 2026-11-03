@@ -1,0 +1,7 @@
+interface:
+  display_name: "斯坦福讲义风组会ppt"
+  short_description: "借鉴codex-ppt流程，以白底黑红讲义版式制作可编辑的中文学术汇报"
+  icon_large: "./assets/previews/slide-01.png"
+  default_prompt: "使用 $stanford-lecture-ppt，将这次论文、阅读笔记与收获制作成斯坦福讲义风的可编辑组会PPTX。"
+policy:
+  allow_implicit_invocation: true

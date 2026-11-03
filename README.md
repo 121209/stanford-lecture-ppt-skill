@@ -1,0 +1,94 @@
+# 斯坦福课件风格PPT制作
+
+一个面向中文组会、论文阅读与科研学习汇报的 Codex skill。采用斯坦福CS课程讲义式视觉：**白底、黑灰正文、红色强调、充分留白、原图与解释就近放置**，默认交付本地可编辑 PPTX。
+
+它不只是配色模板，也是一套从材料到可汇报成品的制作流程。流程借鉴 [codex-ppt](https://github.com/ningzimu/codex-ppt-skill)，但不默认把整页图片当作最终PPT。
+
+> 独立项目，不是 Stanford 官方模板，与 Stanford University 无隶属或背书关系。公开仓库不含私人组会原稿、私人截图、账户凭据或本机文件路径。
+
+## Demo
+
+[下载可编辑示例 PPTX](assets/demo.pptx)
+
+全新制作的6页匿名示例，展示封面、讲义式层次、公式解释、原生图表、论文工作／阅读收获双栏与总结。所有示例数值均为教学示意，不是论文实验结果；不含真实姓名、学校、日期或私人研究材料。
+
+![封面](assets/previews/slide-01.png)
+![层次文字](assets/previews/slide-02.png)
+![公式解释](assets/previews/slide-03.png)
+![图表与说明](assets/previews/slide-04.png)
+![工作与收获双栏](assets/previews/slide-05.png)
+![总结](assets/previews/slide-06.png)
+
+## 安装
+
+将整个仓库放入个人skills目录，并命名为 `stanford-lecture-ppt`。例如PowerShell：
+
+```powershell
+git clone https://github.com/121209/stanford-lecture-ppt-skill.git "$env:USERPROFILE\.codex\skills\stanford-lecture-ppt"
+```
+
+macOS / Linux：
+
+```bash
+git clone https://github.com/121209/stanford-lecture-ppt-skill.git ~/.codex/skills/stanford-lecture-ppt
+```
+
+如果已有同名目录，请不要覆盖已有修改。安装后在Codex中调用：
+
+```text
+使用 $stanford-lecture-ppt，依据这些论文和阅读笔记，制作10页、约15分钟的组会汇报。
+重点是近期读了什么、论文主线和我的阅读收获。输出可编辑PPTX，讲稿写入每页备注。
+```
+
+局部修订：
+
+```text
+使用 $stanford-lecture-ppt，直接修改这份PPTX，保留页数、顺序和用户改动。
+只修正第3页公式和第5页讲解，不改成整页图片。
+```
+
+仅要求“整理语料”“只出大纲”时，本skill不会擅自开始PPT生产。
+
+## 流程
+
+材料阅读和事实核对 → 逐页大纲与素材映射 → 固定风格及制作路径 → 代表性内容样张 → 逐页任务与结果记录 → 全页质检、修复和备注 → 最终PPTX。
+
+大纲与样张默认确认一次。已有详细逐页指令或明确要求“直接完成”时，记录免确认依据，仍保留内部质量检查。
+
+## 内容和编辑性
+
+- 明确区分论文结论、个人收获和待验证想法，不编造日期、已完成工作或实验结果。
+- 关键文字、公式、表格和解释流程默认可编辑；原论文复杂证据图允许保留图片。
+- 原图保留坐标、色条、图例、单位、条件和来源，不让生图模型仿制实验数据。
+- 屏幕精简，但不能把影响结论的条件全藏进备注；讲稿自然可口述。
+- 不额外附加未要求的PDF、拆散讲稿或素材包。
+
+## 检查工具
+
+两个Python辅助脚本仅依赖标准库。它们**不是独立PPT生成引擎**，也不能代替视觉和科学核验。
+
+```bash
+python scripts/audit_pptx.py assets/demo.pptx
+python scripts/run_state.py --help
+python -m unittest discover -s tests -v
+```
+
+`audit_pptx.py` 按实际页序检查对象、备注、外部关系、越界与大图线索。`run_state.py` 记录确认门、逐页派发、素材／预览hash和检查状态。完整用法见 [制作流程](references/workflow.md)。
+
+## 文件结构
+
+```text
+SKILL.md                 技能入口与边界
+agents/openai.yaml       Codex界面描述
+references/              风格、流程、内容、验收与来源
+scripts/                 只读PPTX审计及制作状态记录
+assets/demo.pptx         匿名可编辑示例
+assets/previews/         示例真实渲染预览
+tests/                   标准库测试
+```
+
+## 致谢与边界
+
+流程设计参考 [ningzimu/codex-ppt-skill](https://github.com/ningzimu/codex-ppt-skill)。本仓库保留其大纲、样张、逐页任务及质检思想，并面向可编辑学术汇报重新组织实现；不依赖其API配置或整页图片组装器。详见 [流程来源与差异](references/provenance.md)。
+
+本仓库未包含第三方课件原件、校徽、字体文件或私人汇报材料。使用者须对自己输入的图片、论文和数据拥有相应使用权限。

@@ -1,0 +1,13 @@
+.build/
+.codex-build/
+.codex-finalizer/
+__pycache__/
+*.pyc
+.env
+.env.*
+!*.example
+*.log
+~$*
+.DS_Store
+Thumbs.db
+node_modules/
