@@ -1,0 +1,70 @@
+name: 使用反馈
+description: 生成或修改课件之后，记下哪一步偏离预期。
+title: "[反馈] "
+labels:
+  - feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        按 `SKILL.md` 的「制作流程」做完或改完一版课件后，用这个表单记录手感不对或结果偏离的那一步。
+
+        只提交可以公开的内容。私人论文、未发表图、密钥和本机路径请先涂掉。分流、验证和合并方式见 [迭代闭环](https://github.com/121209/stanford-lecture-ppt-skill/blob/main/docs/ITERATION.md)。
+  - type: textarea
+    id: prompt
+    attributes:
+      label: 当时的提问 / 主题
+      description: 你交给 skill 的要求。包括主题、页数、时长、新稿还是修改，以及必须保留的限制。
+      placeholder: 例如：依据这三篇论文的阅读笔记，做 10 页、约 15 分钟的组会汇报，输出可编辑 PPTX，讲稿写入备注。
+    validations:
+      required: true
+  - type: dropdown
+    id: workflow_step
+    attributes:
+      label: 出问题或不顺手的步骤
+      description: 前七项与 SKILL.md「制作流程」的编号一致。涉及多步时选最后一项，并在「实际」里写明分别是什么。
+      options:
+        - "1. 核对材料、任务类型、受众、时长、页数及未知状态"
+        - "2. 大纲：逐页目的、主要信息、素材映射、个人收获与备注重点（默认合并确认一次）"
+        - "3. 风格已定；检查原生制作工具，仅在用户明确接受时启用生图并固定后端"
+        - "4. 做一页内容样张并真实检查；新稿认可后再铺开（豁免时仍做内部检查）"
+        - "5. run_state.py 保存门、方法、逐页任务、原图 hash、产物及检查记录"
+        - "6. 制作、渲染、逐页检查、修复、备注写回并再次导出"
+        - "7. 结构审计与状态验证，并人工核对内容、编辑性与视觉"
+        - "不止一步，或对不上上面任一步"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期
+      description: 按 SKILL.md，这一步应发生什么，或这一页应呈现成什么样。
+      placeholder: 例如：样张未经认可前，不批量制作其余各页。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际
+      description: 代理实际做了什么，或课件实际长什么样。
+      placeholder: 例如：大纲尚未确认就导出了完整 PPTX，备注是空的。
+    validations:
+      required: true
+  - type: textarea
+    id: attachment
+    attributes:
+      label: 附件 / 截图
+      description: 把出问题的页面截图粘贴或拖进这个框，GitHub 会上传图片。也可以留下可公开文件的链接。请涂掉姓名、未发表数据和账号信息。
+      placeholder: 粘贴截图，或写下链接。
+    validations:
+      required: false
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 严重程度
+      options:
+        - "低：成品能用，这一步手感或结果别扭"
+        - "中：要返工若干页，或重做这一步"
+        - "高：流程中断，或成品不能拿去汇报"
+    validations:
+      required: true

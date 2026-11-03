@@ -85,7 +85,18 @@ scripts/                 只读PPTX审计及制作状态记录
 assets/demo.pptx         匿名可编辑示例
 assets/previews/         示例真实渲染预览
 tests/                   标准库测试
+docs/ITERATION.md        使用、反馈、分流、验证与合并
+.github/                 Issue 表单与 PR 检查清单
 ```
+
+## 如何迭代本 skill
+
+用本 skill 做出课件之后，若某一步偏离预期，或希望修改流程、风格、质检、示例、文档，按 [迭代闭环](docs/ITERATION.md) 处理：先开 issue，再以一次只做一件事的 PR 修改，验证后合并。
+
+- 使用反馈：[填写表单](https://github.com/121209/stanford-lecture-ppt-skill/issues/new?template=skill-feedback.yml)（模板 [skill-feedback.yml](.github/ISSUE_TEMPLATE/skill-feedback.yml)）
+- 改进提议：[填写表单](https://github.com/121209/stanford-lecture-ppt-skill/issues/new?template=skill-improvement.yml)（模板 [skill-improvement.yml](.github/ISSUE_TEMPLATE/skill-improvement.yml)）
+
+空白 issue 已关闭。PR 请按 [检查清单](.github/PULL_REQUEST_TEMPLATE.md) 写明关联 issue、改动的小节或文件、改前与改后，并在改了脚本或示例课件时附上测试和 `audit_pptx.py` 的结果。
 
 ## 致谢与边界
 
