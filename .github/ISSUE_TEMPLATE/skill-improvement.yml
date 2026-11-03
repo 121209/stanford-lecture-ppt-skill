@@ -1,0 +1,49 @@
+name: 改进提议
+description: 提议修改流程、风格规则、质检脚本、示例或文档。
+title: "[改进] "
+labels:
+  - improve-skill
+body:
+  - type: markdown
+    attributes:
+      value: |
+        用这个表单提议一处具体改动。一次 issue 只讲一个问题。
+
+        表单会加上 `improve-skill`。维护者再按「范围」追加 `improve-workflow`、`improve-qa` 或 `improve-demo`。闭环说明见 [迭代闭环](https://github.com/121209/stanford-lecture-ppt-skill/blob/main/docs/ITERATION.md)。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 范围
+      description: 选这次主要要改的一块。风格规则和文档保留 improve-skill；其余范围在分流时追加更细的标签。
+      options:
+        - "workflow｜制作流程"
+        - "style rules｜风格规则"
+        - "QA & audit scripts｜质检与审计脚本"
+        - "demo & examples｜示例与 demo"
+        - "docs｜文档"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题
+      description: 现在哪条规则、哪段流程或哪个文件让制作走偏、难以执行或难以检查。
+      placeholder: 例如：样张豁免之后，文本没有写明内部质量检查仍然要做。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提议的改动
+      description: 要改 SKILL.md 的哪一节，或哪一份 reference、脚本、示例、文档。写出希望改成的规则。
+      placeholder: 例如：在「制作流程」第 4 步补一句：豁免确认时仍把内部样张检查写入逐页 QA。
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 如何验证
+      description: 怎样确认改动生效。可以是同一份材料的改前改后、一条测试，或对样例运行 python scripts/audit_pptx.py。
+      placeholder: 例如：用一份要求直接完成的短笔记重跑；确认状态记录里有内部样张检查，且 python -m unittest discover tests 通过。
+    validations:
+      required: true
