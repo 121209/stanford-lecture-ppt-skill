@@ -1,29 +1,42 @@
 #!/usr/bin/env python3
 """Replace {{MATH:id}} runs with native PowerPoint OMML plus a picture fallback.
 
-Does not author a deck by itself. Pandoc is optional and used only when a
-formula spec has ``latex`` and neither ``runs`` nor ``omml``. The equation is
-written as ``mc:AlternateContent`` / ``mc:Choice Requires="a14"`` / ``a14:m`` /
-``m:oMathPara`` / ``m:oMath`` on the text shape (MS-ODRAWXML). ``mc:Fallback``
-is the same shape box filled with a high-DPI PNG, so a reader that does not
-draw OMML still shows the equation. LaTeX source is never written onto a slide.
+Does not author a deck by itself. A formula spec resolves in this order:
+``runs``, then ``omml``, then ``latex``. LaTeX is compiled with the vendored
+ppt-master compiler in block mode, so summation limits use ``undOvr``. This
+module keeps its own ``m:oMathPara`` wrapper. Pandoc is used only when that
+compiler raises and pandoc is installed. Otherwise the command fails.
+
+The equation is written as ``mc:AlternateContent`` / ``mc:Choice Requires="a14"``
+/ ``a14:m`` / ``m:oMathPara`` / ``m:oMath`` (MS-ODRAWXML). ``mc:Fallback`` is a
+high-DPI PNG of the same formula, fitted to the box without stretching.
+LaTeX source is never written onto a slide.
 
 Rendering the fallback PNG needs matplotlib.
 """
 import argparse
+import importlib.util
 import io
 import json
 import posixpath
 import re
 import shutil
+import struct
 import subprocess
+import sys
 import tempfile
+import types
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 # Keep aligned with scripts/audit_pptx.py RAW_LATEX.
+# Mathtext has no style switches. Dropping these leaves the same symbols;
+# commands it still cannot draw fail the render instead of leaking source.
+_MATHTEXT_DROP = re.compile(
+    r"\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle|limits|nolimits)\b"
+)
 RAW_LATEX = re.compile(
     r"\\(?:frac|dfrac|tfrac|sum|prod|int|iint|iiint|lambda|alpha|beta|gamma|theta|sigma|"
     r"mu|nu|omega|phi|psi|delta|epsilon|left|right|cdot|times|sqrt|mathbb|mathrm|mathbf|"
@@ -139,6 +152,73 @@ def serialize_omath(elem):
     return xml
 
 
+def _load_formula_compiler():
+    """Load the vendored ppt-master compiler. The five modules stay unchanged."""
+    package_name = "pptmaster_formula"
+    loaded = sys.modules.get(package_name + ".formula_compiler")
+    if loaded is not None and hasattr(loaded, "compile_latex_to_omml"):
+        return loaded
+    root = Path(__file__).resolve().parent / "vendor" / "pptmaster_formula"
+    compiler_path = root / "formula_compiler.py"
+    if not compiler_path.is_file():
+        raise ValueError("Vendored formula compiler is missing")
+    package = sys.modules.get(package_name)
+    if package is None:
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(root)]
+        package.__package__ = package_name
+        sys.modules[package_name] = package
+    spec = importlib.util.spec_from_file_location(
+        package_name + ".formula_compiler", compiler_path
+    )
+    module = importlib.util.module_from_spec(spec)
+    module.__package__ = package_name
+    sys.modules[package_name + ".formula_compiler"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _omath_from_block(block_xml):
+    """Take the inner m:oMath from a block m:oMathPara compile."""
+    root = ET.fromstring(block_xml)
+    found = None
+    for child in root.iter():
+        if _local(child.tag) == "m:oMath":
+            found = child
+            break
+    if found is None:
+        raise ValueError("Formula compiler did not produce m:oMath")
+    return serialize_omath(found)
+
+
+def omml_from_vendor(latex):
+    """Block-compile LaTeX. Summation limits are undOvr. Unsupported commands raise."""
+    compiler = _load_formula_compiler()
+    try:
+        block = compiler.compile_latex_to_omml(latex)
+    except compiler.FormulaCompileError as exc:
+        raise ValueError(str(exc)) from exc
+    return _omath_from_block(block)
+
+
+def omml_from_latex(latex):
+    """Vendored compiler, then pandoc if that raises and pandoc exists, else fail."""
+    source = _unwrap_math_dollars(latex)
+    if not source:
+        raise ValueError("latex must be a non-empty string")
+    try:
+        return omml_from_vendor(source)
+    except ValueError as compiler_error:
+        compiled = None
+        try:
+            compiled = omml_from_pandoc(source)
+        except ValueError:
+            compiled = None
+        if compiled:
+            return compiled
+        raise compiler_error
+
+
 def omml_from_pandoc(latex):
     if shutil.which("pandoc") is None:
         return None
@@ -174,13 +254,7 @@ def omml_for_spec(spec):
     if spec.get("latex"):
         if not isinstance(spec["latex"], str) or not spec["latex"].strip():
             raise ValueError("latex must be a non-empty string")
-        omml = omml_from_pandoc(spec["latex"])
-        if omml is None:
-            raise ValueError(
-                "pandoc is not available; use a high-DPI math image or provide runs/omml. "
-                "Refusing to place LaTeX source on the slide."
-            )
-        return omml
+        return omml_from_latex(spec["latex"])
     raise ValueError("Formula spec needs runs, omml, or latex")
 
 
@@ -230,17 +304,34 @@ def _omml_plain(omml_xml):
     )
 
 
+def _unwrap_math_dollars(latex):
+    text = latex.strip()
+    if text.startswith("$$") and text.endswith("$$") and len(text) >= 4:
+        return text[2:-2].strip()
+    if len(text) >= 2 and text.startswith("$") and text.endswith("$"):
+        return text[1:-1].strip()
+    return text
+
+
+def _mathtext_latex(latex):
+    """Same LaTeX string mathtext will draw. Style commands it rejects are removed."""
+    text = _MATHTEXT_DROP.sub("", _unwrap_math_dollars(latex))
+    text = text.replace(r"\operatorname*{", r"\operatorname{")
+    return text.strip()
+
+
 def mathtext_for_spec(spec, omml_xml):
-    """Mathtext for the fallback image only. This string is not written into the pptx."""
+    """Mathtext for the fallback image only. This string is not written into the pptx.
+
+    A ``latex`` spec is drawn from that string, not rebuilt from ``runs``.
+    """
+    if isinstance(spec, dict) and isinstance(spec.get("latex"), str) and spec["latex"].strip():
+        body = _mathtext_latex(spec["latex"])
+        if not body:
+            raise ValueError("latex did not produce a mathtext expression")
+        return "$" + body + "$"
     if isinstance(spec, dict) and spec.get("runs"):
         return "$" + _runs_mathtext(spec["runs"]) + "$"
-    if isinstance(spec, dict) and spec.get("latex") and isinstance(spec["latex"], str):
-        latex = spec["latex"].strip()
-        if latex.startswith("$$") and latex.endswith("$$"):
-            latex = latex[2:-2].strip()
-        elif latex.startswith("$") and latex.endswith("$"):
-            latex = latex[1:-1].strip()
-        return "$" + latex + "$"
     return _omml_plain(omml_xml) or "?"
 
 
@@ -257,20 +348,28 @@ def _png_figure(draw, width_in, height_in):
     try:
         draw(axis, height_in)
         buffer = io.BytesIO()
-        figure.savefig(buffer, format="png", dpi=400, facecolor="white")
+        figure.savefig(
+            buffer, format="png", dpi=400, facecolor="white",
+            bbox_inches="tight", pad_inches=0.06,
+        )
     finally:
         plt.close(figure)
     return buffer.getvalue()
 
 
-def render_equation_png(expressions, width_in, height_in, plain):
-    """High-DPI PNG. expressions are mathtext; plain is used if mathtext cannot draw them."""
+def render_equation_png(expressions, width_in, height_in, plain, strict=False):
+    """High-DPI PNG of the formula. ``strict`` refuses a plain-text stand-in.
+
+    The font is stixsans so the fallback sits next to the sans body. When
+    ``strict`` is set, a command mathtext cannot draw aborts the inject.
+    Runs-only specs may still fall back to the OMML's visible text.
+    """
     width_in = max(1.2, min(12.0, float(width_in)))
     height_in = max(0.45, min(3.5, float(height_in)))
     try:
         import matplotlib
         matplotlib.use("Agg", force=False)
-        matplotlib.rcParams["mathtext.fontset"] = "dejavusans"
+        matplotlib.rcParams["mathtext.fontset"] = "stixsans"
     except ImportError as exc:
         raise ValueError(
             "matplotlib is required to render the OMML fallback image"
@@ -285,9 +384,25 @@ def render_equation_png(expressions, width_in, height_in, plain):
                 fontsize=size, color="#222222", va="center", ha="left",
             )
 
+    if strict:
+        from matplotlib import mathtext
+        parser = mathtext.MathTextParser("agg")
+        for expr in expressions:
+            try:
+                parser.parse(expr, dpi=72)
+            except Exception as exc:
+                raise ValueError(
+                    "matplotlib mathtext could not render this formula fallback. "
+                    "Refusing to place LaTeX source on the slide."
+                ) from exc
     try:
         return _png_figure(draw_math, width_in, height_in)
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise ValueError(
+                "matplotlib mathtext could not render this formula fallback. "
+                "Refusing to place LaTeX source on the slide."
+            ) from exc
         def draw_plain(axis, height):
             axis.text(
                 0.03, 0.5, plain or "?",
@@ -347,12 +462,67 @@ def _xfrm_box(shape):
     return xfrm, width, height
 
 
+def _png_size(blob):
+    if len(blob) < 24 or blob[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("Equation fallback is not a PNG")
+    width, height = struct.unpack(">II", blob[16:24])
+    if width <= 0 or height <= 0:
+        raise ValueError("Equation fallback PNG has no pixels")
+    return width, height
+
+
+def _set_xml_attr(fragment, tag, name, value):
+    pattern = r"(<" + tag + r"\b[^>]*\b" + name + r'=")[^"]*"'
+    updated, count = re.subn(
+        pattern, lambda match: match.group(1) + str(int(value)) + '"', fragment, count=1
+    )
+    if count != 1:
+        raise ValueError("Missing " + tag + " @" + name)
+    return updated
+
+
+def _fit_xfrm(xfrm, png_w, png_h):
+    """Fit the fallback box inside the placeholder at the PNG's aspect ratio.
+
+    The picture is left-aligned and vertically centered. It is not stretched
+    to the placeholder.
+    """
+    ext = _attrs(xfrm, "a:ext")
+    off = _attrs(xfrm, "a:off")
+    try:
+        cx = int(ext.get("cx", "0"))
+        cy = int(ext.get("cy", "0"))
+        ox = int(off.get("x", "0"))
+        oy = int(off.get("y", "0"))
+    except ValueError:
+        return xfrm
+    if cx <= 0 or cy <= 0 or png_w <= 0 or png_h <= 0:
+        return xfrm
+    if png_w * cy >= png_h * cx:
+        new_cx = cx
+        new_cy = max(1, int(round(cx * png_h / float(png_w))))
+        if new_cy > cy:
+            new_cy = cy
+    else:
+        new_cy = cy
+        new_cx = max(1, int(round(cy * png_w / float(png_h))))
+        if new_cx > cx:
+            new_cx = cx
+    new_x = ox
+    new_y = oy + max(0, (cy - new_cy) // 2)
+    fitted = _set_xml_attr(xfrm, "a:ext", "cx", new_cx)
+    fitted = _set_xml_attr(fitted, "a:ext", "cy", new_cy)
+    fitted = _set_xml_attr(fitted, "a:off", "x", new_x)
+    fitted = _set_xml_attr(fitted, "a:off", "y", new_y)
+    return fitted
+
+
 def _fallback_shape(xfrm, rel_id, shape_id):
     return (
         '<p:sp><p:nvSpPr><p:cNvPr id="%d" name="Equation fallback"/>'
         "<p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>%s"
         '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-        '<a:blipFill><a:blip r:embed="%s"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>'
+        '<a:blipFill><a:blip r:embed="%s"/></a:blipFill>'
         "<a:ln><a:noFill/></a:ln>"
         "</p:spPr></p:sp>"
     ) % (shape_id, xfrm, rel_id)
@@ -455,7 +625,17 @@ def transform_slide(xml_text, formulas, rels_text, media_stem):
         expressions = [mathtext_for_spec(formulas[item], cache[item]) for item in used_ids]
         plain = "  ".join(_omml_plain(cache[item]) for item in used_ids)
         xfrm, width, height = _xfrm_box(shape)
-        png = render_equation_png(expressions, width, max(height, 0.45 * len(expressions)), plain)
+        strict = any(
+            isinstance(formulas.get(item), dict)
+            and isinstance(formulas[item].get("latex"), str)
+            and formulas[item]["latex"].strip()
+            for item in used_ids
+        )
+        png = render_equation_png(
+            expressions, width, max(height, 0.45 * len(expressions)), plain, strict=strict
+        )
+        png_w, png_h = _png_size(png)
+        xfrm = _fit_xfrm(xfrm, png_w, png_h)
         rel_id = _fresh_rid(rels)
         slug = "-".join(used_ids)
         part = "ppt/media/%s-%s.png" % (media_stem, slug)

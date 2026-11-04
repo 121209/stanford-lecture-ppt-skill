@@ -1,7 +1,9 @@
 """Small behavioral tests; fixtures are synthetic package fragments, not deliverable decks."""
 import importlib.util
 import json
+import re
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +12,7 @@ import unittest
 import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO
 
 ROOT = Path(__file__).resolve().parents[1]
 def load(name):
@@ -374,15 +376,13 @@ class HelperTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 inject.inject_pptx(src, {'rate': {'runs': [{'t': r'\lambda'}]}}, bad)
             self.assertFalse(bad.exists())
-            pandoc_out = folder/'pandoc.pptx'
-            if shutil.which('pandoc'):
-                inject.inject_pptx(src, {'rate': {'latex': r'\lambda(t)=\alpha'}}, pandoc_out)
-                self.assertEqual(audit.audit(pandoc_out)['slides_with_raw_latex'], [])
-            else:
-                with self.assertRaises(ValueError) as caught:
-                    inject.inject_pptx(src, {'rate': {'latex': r'\lambda(t)=\alpha'}}, pandoc_out)
-                self.assertIn('pandoc', str(caught.exception))
-                self.assertFalse(pandoc_out.exists())
+            latex_out = folder/'latex.pptx'
+            inject.inject_pptx(src, {'rate': {'latex': r'\lambda(t)=\alpha'}}, latex_out)
+            latex_report = audit.audit(latex_out)
+            self.assertEqual(latex_report['office_math_count'], 1)
+            self.assertEqual(latex_report['slides_with_raw_latex'], [])
+            self.assertNotIn(b'\\lambda', latex_out.read_bytes())
+            self.assertNotIn(b'{{MATH:', latex_out.read_bytes())
 
     def test_diagram_helper_builds_audited_flow(self):
         try:
@@ -683,5 +683,264 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(report['slides_over_word_cap'], [])
         self.assertEqual(report['slides_with_empty_lower_content_band'], [])
         self.assertEqual(report['slides_missing_diagram'], [])
+
+    def test_vendor_latex_compiles_hawkes_and_attention(self):
+        inject = load('inject_omml')
+        hawkes = {
+            'rate': r'\lambda(t)=\mu+\sum_{t_i<t}\alpha e^{-\beta(t-t_i)}',
+            'll': r'\log L=\sum_{i=1}^{n}\log\lambda(t_i)-\int_0^T\lambda(t)\,dt',
+        }
+        attention = r'\mathrm{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V'
+        rate = inject.omml_for_spec({'latex': hawkes['rate']})
+        ll = inject.omml_for_spec({'latex': hawkes['ll']})
+        attn = inject.omml_for_spec({'latex': attention})
+        for omml in (rate, ll, attn):
+            self.assertIn('<m:oMath', omml)
+            self.assertNotIn('<m:oMathPara', omml)
+            self.assertIsNone(inject.RAW_LATEX.search(omml))
+        self.assertIn('undOvr', rate)
+        self.assertIn('undOvr', ll)
+        self.assertIn('<m:nary', rate)
+        self.assertIn('<m:nary', ll)
+        self.assertIn('subSup', ll)
+        self.assertIn('<m:f', attn)
+        self.assertIn('<m:rad', attn)
+        both = inject.omml_for_spec({'runs': [{'t': 'λ'}], 'latex': r'\alpha'})
+        self.assertIn('λ', both)
+        self.assertNotIn('>α<', both)
+        drawn = inject.mathtext_for_spec({'runs': [{'t': 'log'}], 'latex': r'\log L'}, '')
+        self.assertIn(r'\log', drawn)
+        self.assertNotIn('displaystyle', inject.mathtext_for_spec({'latex': r'\displaystyle\sum_i i'}, ''))
+        with self.assertRaises(ValueError) as caught:
+            inject.omml_for_spec({'latex': r'\foo'})
+        self.assertIn('Unsupported', str(caught.exception))
+        self.assertIn(r'\foo', str(caught.exception))
+
+    def test_latex_omml_validates_and_fallback_keeps_aspect(self):
+        try:
+            from pptx import Presentation
+            from pptx.util import Emu, Inches, Pt
+        except ImportError:
+            self.skipTest('python-pptx is not installed')
+        inject = load('inject_omml')
+        soffice = shutil.which('soffice') or shutil.which('libreoffice')
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            prs = Presentation()
+            prs.slide_width = Emu(12192000)
+            prs.slide_height = Emu(6858000)
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            # Wide and short on purpose: stretching this box would change the glyph aspect.
+            box = slide.shapes.add_textbox(Inches(0.55), Inches(2.4), Inches(11.2), Inches(0.55))
+            box.text_frame.paragraphs[0].text = '{{MATH:ll}}'
+            box.text_frame.paragraphs[0].runs[0].font.size = Pt(22)
+            src = folder/'in.pptx'
+            prs.save(str(src))
+            dest = folder/'out.pptx'
+            inject.inject_pptx(src, {
+                'll': {'latex': r'\log L=\sum_{i=1}^{n}\log\lambda(t_i)-\int_0^T\lambda(t)\,dt'},
+            }, dest)
+            blob = dest.read_bytes()
+            self.assertNotIn(b'{{MATH:', blob)
+            self.assertNotIn(b'\\log', blob)
+            self.assertNotIn(b'\\sum', blob)
+            self.assertNotIn(b'<a:fillRect', blob)
+            self.assertIn(b'undOvr', blob)
+            report = audit.audit(dest)
+            self.assertEqual(report['office_math_count'], 1)
+            self.assertEqual(report['slides_with_invalid_office_math'], [])
+            self.assertEqual(report['slides_with_raw_latex'], [])
+            self._assert_native_omml_package(dest)
+            self._assert_fallback_aspect(dest)
+            runs_png = inject.render_equation_png(
+                [inject.mathtext_for_spec({
+                    'runs': [
+                        {'t': 'log L='},
+                        {'sub': {'base': 'Σ', 'sub': 'i=1…n'}},
+                        {'t': ' log λ(ti) − ∫ λ(t) dt'},
+                    ],
+                }, '')],
+                8.0, 1.2, 'log', strict=False,
+            )
+            latex_png = inject.render_equation_png(
+                [inject.mathtext_for_spec({
+                    'latex': r'\log L=\sum_{i=1}^{n}\log\lambda(t_i)-\int_0^T\lambda(t)\,dt',
+                }, '')],
+                8.0, 1.2, 'log', strict=True,
+            )
+            runs_h = self._ink_height(runs_png)
+            latex_h = self._ink_height(latex_png)
+            self.assertGreater(latex_h / float(runs_h), 1.3)
+            aligned = folder/'aligned.pptx'
+            with self.assertRaises(ValueError):
+                inject.inject_pptx(src, {
+                    'll': {'latex': r'\begin{aligned}a&=b\\c&=d\end{aligned}'},
+                }, aligned)
+            self.assertFalse(aligned.exists())
+            if soffice:
+                ratio = self._render_nonwhite_ratio(soffice, dest, folder/'render')
+                self.assertGreater(ratio, 0.001, 'LibreOffice formula fallback was blank')
+
+    def _assert_fallback_aspect(self, path):
+        ns = {
+            'a': audit.NS['a'],
+            'mc': audit.NS['mc'],
+            'r': audit.NS['r'],
+        }
+        with zipfile.ZipFile(path) as package:
+            root = ET.fromstring(package.read('ppt/slides/slide1.xml'))
+            fallback = root.find('.//mc:Fallback', ns)
+            self.assertIsNotNone(fallback)
+            blip = fallback.find('.//a:blip', ns)
+            ext = fallback.find('.//a:ext', ns)
+            self.assertIsNotNone(blip)
+            self.assertIsNotNone(ext)
+            embed = blip.get('{%s}embed' % audit.NS['r'])
+            rels = ET.fromstring(package.read('ppt/slides/_rels/slide1.xml.rels'))
+            target = next(rel.get('Target') for rel in rels if rel.get('Id') == embed)
+            png = package.read('ppt/media/' + target.split('/')[-1])
+        png_w, png_h = struct.unpack('>II', png[16:24])
+        cx, cy = int(ext.get('cx')), int(ext.get('cy'))
+        png_aspect = png_w / float(png_h)
+        box_aspect = cx / float(cy)
+        self.assertLess(
+            abs(png_aspect - box_aspect) / box_aspect, 0.02,
+            'png %sx%s vs xfrm %sx%s' % (png_w, png_h, cx, cy),
+        )
+
+    def _ink_height(self, blob):
+        from PIL import Image
+        image = Image.open(BytesIO(blob)).convert('RGB')
+        pixels = image.load()
+        width, height = image.size
+        top, bottom = height, 0
+        for y in range(height):
+            for x in range(width):
+                red, green, blue = pixels[x, y]
+                if red < 240 or green < 240 or blue < 240:
+                    top = min(top, y)
+                    bottom = max(bottom, y)
+        self.assertLess(top, bottom)
+        return bottom - top + 1
+
+    def test_method_title_with_valid_omml_is_not_missing_diagram(self):
+        try:
+            from pptx import Presentation
+            from pptx.util import Emu, Inches, Pt
+        except ImportError:
+            self.skipTest('python-pptx is not installed')
+        inject = load('inject_omml')
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            prs = Presentation()
+            prs.slide_width = Emu(12192000)
+            prs.slide_height = Emu(6858000)
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            title = slide.shapes.add_textbox(Inches(0.7), Inches(0.38), Inches(11), Inches(0.6))
+            title.text_frame.paragraphs[0].text = '方法：λ(t)'
+            title.text_frame.paragraphs[0].runs[0].font.size = Pt(32)
+            box = slide.shapes.add_textbox(Inches(0.7), Inches(1.8), Inches(8.5), Inches(1.15))
+            box.text_frame.paragraphs[0].text = '{{MATH:rate}}'
+            lower = slide.shapes.add_textbox(Inches(0.7), Inches(5.2), Inches(10), Inches(0.5))
+            lower.text_frame.paragraphs[0].text = '条件强度，符号见备注。'
+            src = folder/'in.pptx'
+            prs.save(str(src))
+            dest = folder/'out.pptx'
+            inject.inject_pptx(src, {
+                'rate': {'latex': r'\lambda(t)=\mu+\sum_{t_i<t}\alpha e^{-\beta(t-t_i)}'},
+            }, dest)
+            report = audit.audit(dest)
+            self.assertGreater(report['office_math_count'], 0)
+            self.assertEqual(report['slides_with_invalid_office_math'], [])
+            self.assertEqual(report['slides'][0]['picture_count'], 0)
+            self.assertEqual(report['slides'][0]['diagram_object_count'], 0)
+            self.assertEqual(report['slides'][0]['native_chart_count'], 0)
+            self.assertTrue(report['slides'][0]['algorithm_intent'])
+            self.assertNotIn(
+                'algorithm_page_missing_diagram',
+                [item['code'] for item in report['slides'][0]['warnings']],
+            )
+            plain = folder/'plain.pptx'
+            write_raw_deck(plain, [
+                raw_textbox(2, '封面'),
+                raw_textbox(2, '方法：λ(t)', y=400000, sz=3200)
+                + raw_textbox(3, '只有文字，没有公式。', y=1800000),
+            ])
+            plain_report = audit.audit(plain)
+            self.assertEqual(plain_report['slides_missing_diagram'], [2])
+
+    def test_bar_chart_is_schema_legal(self):
+        try:
+            import pptx  # noqa: F401
+            from lxml import etree
+        except ImportError:
+            self.skipTest('python-pptx or lxml is not installed')
+        charts = load('chart_helpers')
+        helpers = load('diagram_helpers')
+        soffice = shutil.which('soffice') or shutil.which('libreoffice')
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            prs = helpers.new_deck()
+            slide = helpers.add_blank_slide(prs)
+            # Selective Copying accuracies reported in Gu & Dao 2023, Table 1.
+            helpers.add_bar_chart(
+                slide,
+                ['S4（LTI SSM）', 'S6（Mamba 选择性）'],
+                [18.3, 99.8],
+                (helpers.emu(0.8), helpers.emu(1.6), helpers.emu(7.6), helpers.emu(3.6)),
+                highlight=1,
+                source='来源：Gu & Dao 2023, Table 1（原文报告，本人未复现）',
+            )
+            path = folder/'chart.pptx'
+            prs.save(str(path))
+            report = audit.audit(path)
+            self.assertEqual(report['slides'][0]['native_chart_count'], 1)
+            with zipfile.ZipFile(path) as package:
+                chart_xml = package.read('ppt/charts/chart1.xml')
+                slide_xml = package.read('ppt/slides/slide1.xml')
+            text = chart_xml.decode('utf-8')
+            self.assertIn('>18.3<', text)
+            self.assertIn('>99.8<', text)
+            self.assertNotIn('<c:legend', text)
+            self.assertNotIn('<c:title', text)
+            self.assertIn('C00000', text)
+            self.assertIn('BFBFBF', text)
+            self.assertIn('<c:min val="0"', text.replace('0.0', '0'))
+            self.assertNotRegex(text, r'<c:(?:axId|crossAx) val="-\d+"')
+            for value in re.findall(r'<c:(?:axId|crossAx) val="(-?\d+)"', text):
+                self.assertGreaterEqual(int(value), 0)
+            schema_dir = _ooxml_schema_dir()
+            self.assertIsNotNone(schema_dir)
+            chart_schema = etree.XMLSchema(etree.parse(str(schema_dir / 'dml-chart.xsd')))
+            slide_schema = etree.XMLSchema(etree.parse(str(schema_dir / 'pml.xsd')))
+            self.assertTrue(chart_schema.validate(etree.fromstring(chart_xml)), chart_schema.error_log)
+            self.assertTrue(slide_schema.validate(etree.fromstring(slide_xml)), slide_schema.error_log)
+            saved = sys.argv
+            try:
+                sys.argv = ['audit_pptx.py', str(path)]
+                with redirect_stdout(StringIO()):
+                    code = audit.main()
+            finally:
+                sys.argv = saved
+            self.assertEqual(code, 0)
+            if soffice:
+                ratio = self._render_nonwhite_ratio(soffice, path, folder/'render')
+                self.assertGreater(ratio, 0.001, 'LibreOffice chart was blank')
+        with self.assertRaises(ValueError):
+            charts._numbers([-1, 2])
+
+    def test_audit_samples_exit_zero(self):
+        for sample in (
+            ROOT/'assets/demo.pptx',
+            ROOT/'assets/diagram-samples/figure-first.pptx',
+        ):
+            saved = sys.argv
+            try:
+                sys.argv = ['audit_pptx.py', str(sample)]
+                with redirect_stdout(StringIO()):
+                    code = audit.main()
+            finally:
+                sys.argv = saved
+            self.assertEqual(code, 0, sample.name)
 
 if __name__ == '__main__':unittest.main()

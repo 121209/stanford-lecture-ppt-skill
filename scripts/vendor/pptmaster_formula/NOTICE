@@ -1,0 +1,18 @@
+This directory is a verbatim copy of the LaTeX-to-OMML formula compiler from
+ppt-master.
+
+Source repository: https://github.com/hugohe3/ppt-master
+Commit: 4a68cddaf40dc87891e6b64c6a69ef46adc1110c
+License: MIT (see LICENSE in this directory)
+Copyright: (c) 2025-2026 Hugo He
+
+Files copied unchanged:
+  formula_ast.py
+  formula_profile.py
+  formula_parser.py
+  formula_omml.py
+  formula_compiler.py
+
+The MIT license requires the copyright and permission notice to travel with
+these files. ppt-master's attribution guard, SVG pipeline, and other modules
+are not included.
