@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Read-only OOXML inventory. This is not a visual or scientific QA verdict."""
+"""Read-only OOXML inventory. This is not a visual or scientific QA verdict.
+
+Also estimates per-slide on-screen word counts against a 40-word cap (cover exempt).
+"""
 import argparse
 import hashlib
 import json
 import posixpath
+import re
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
@@ -19,6 +23,18 @@ NS = {
     "mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
 }
 EMU_PER_PX = 9525
+WORD_CAP = 40
+# Explicit run size is in hundredths of a point. 15pt source lines are excluded.
+SOURCE_LINE_MAX_HUNDREDTHS_PT = 1500
+# Bottom band of the slide: ≤15pt paragraphs here are treated as source lines.
+FOOTER_SOURCE_MIN_Y_RATIO = 0.85
+CJK_CHAR = re.compile(r"[\u3400-\u9fff]")
+LATIN_WORD = re.compile(r"[A-Za-z0-9]+(?:[-'’./][A-Za-z0-9]+)*")
+PAGE_NUMBER_TEXT = re.compile(r"\d{1,3}")
+SOURCE_MARK = re.compile(
+    r"(来源\s*[:：]|出处\s*[:：]|图源\s*[:：]|资料来源|引自|Source\s*:|DOI\b|doi\s*:|arXiv|https?://)",
+    re.IGNORECASE,
+)
 
 
 def tag(prefix, local):
@@ -58,6 +74,87 @@ def objects(container, nested=False):
 def text_of(node):
     return "\n".join("".join(t.itertext()) for t in node.iter()
                      if t.tag in (tag("a", "t"), tag("m", "t")))
+
+
+def word_count(text):
+    """CJK: 2 characters = 1 word. Other letters and numbers: one token = 1 word."""
+    cjk = CJK_CHAR.findall(text)
+    rest = CJK_CHAR.sub(" ", text)
+    return len(cjk) / 2 + len(LATIN_WORD.findall(rest))
+
+
+def format_word_count(value):
+    rounded = round(value, 1)
+    if rounded == int(rounded):
+        return int(rounded)
+    return rounded
+
+
+def _run_size(run, default_sz):
+    r_pr = run.find("a:rPr", NS)
+    if r_pr is not None and r_pr.get("sz"):
+        try:
+            return int(r_pr.get("sz"))
+        except ValueError:
+            return default_sz
+    return default_sz
+
+
+def paragraph_pieces(paragraph):
+    default_sz = None
+    p_pr = paragraph.find("a:pPr", NS)
+    if p_pr is not None:
+        def_rpr = p_pr.find("a:defRPr", NS)
+        if def_rpr is not None and def_rpr.get("sz"):
+            try:
+                default_sz = int(def_rpr.get("sz"))
+            except ValueError:
+                default_sz = None
+    pieces = []
+    for child in list(paragraph):
+        if child.tag in (tag("a", "r"), tag("a", "fld")):
+            text = "".join(node.text or "" for node in child.iter(tag("a", "t")))
+            if text:
+                pieces.append((text, _run_size(child, default_sz)))
+        elif child.tag in (tag("m", "oMath"), tag("m", "oMathPara")):
+            text = "".join(node.text or "" for node in child.iter(tag("m", "t")))
+            if text:
+                pieces.append((text, None))
+    return pieces
+
+
+def paragraph_words(paragraph, in_footer):
+    """Count one paragraph. Drop page numbers and ≤15pt source lines; keep shrunk body text."""
+    pieces = paragraph_pieces(paragraph)
+    if not pieces:
+        return 0.0
+    visible = "".join(text for text, _ in pieces).strip()
+    if not visible:
+        return 0.0
+    sizes = [sz for _, sz in pieces]
+    small = all(sz is not None and sz <= SOURCE_LINE_MAX_HUNDREDTHS_PT for sz in sizes)
+    if PAGE_NUMBER_TEXT.fullmatch(visible) and (small or in_footer or all(sz is None for sz in sizes)):
+        return 0.0
+    if small and (in_footer or SOURCE_MARK.search(visible)):
+        return 0.0
+    return word_count(visible)
+
+
+def onscreen_words(shape, box, slide_h, nested):
+    ph = shape.find("p:nvSpPr/p:nvPr/p:ph", NS)
+    if ph is not None and ph.get("type") == "sldNum":
+        return 0.0
+    in_footer = (not nested) and box is not None and slide_h > 0 and box[1] >= slide_h * FOOTER_SOURCE_MIN_Y_RATIO
+    total = 0.0
+    seen = set()
+    for tx_name in (tag("p", "txBody"), tag("a", "txBody")):
+        for body in shape.iter(tx_name):
+            for paragraph in body.findall("a:p", NS):
+                if id(paragraph) in seen:
+                    continue
+                seen.add(id(paragraph))
+                total += paragraph_words(paragraph, in_footer)
+    return total
 
 
 def geometry(node):
@@ -103,7 +200,13 @@ def audit(path):
             "Read-only package inventory. Counts and large-image hints do not prove editability, "
             "visual correctness, notes usefulness, or scientific accuracy. Render and inspect separately. "
             "AlternateContent uses its first Choice when present; app rendering may choose differently. "
-            "Grouped and inherited coordinates are not geometrically validated."
+            "Grouped and inherited coordinates are not geometrically validated. "
+            "onscreen_word_count estimates screen text at 2 CJK characters per word plus Latin tokens. "
+            "It skips slide-number placeholders, digit-only page numbers, and ≤15pt source lines "
+            "(a source marker, or a ≤15pt paragraph in the bottom 15% of the slide). "
+            "Other ≤15pt body text still counts, so shrinking the font does not hide overflow. "
+            "Page 1 is exempt as the cover. Runs without an explicit size are counted. "
+            "This is not a line-break, bullet-limit, or visual-density verdict."
         ),
         "warnings": [],
     }
@@ -144,6 +247,7 @@ def audit(path):
             record = {"page": page, "part": part, "native_text_shape_count": 0,
                       "picture_count": 0, "native_table_count": 0, "native_chart_count": 0,
                       "office_math_count": 0, "native_texts": [], "large_picture_hints": [], "warnings": []}
+            words = 0.0
             for shape, nested in objects(tree):
                 text = text_of(shape)
                 info = shape.find(".//p:cNvPr", NS)
@@ -170,6 +274,17 @@ def audit(path):
                         area = max(0, min(x+w, sw)-max(0, x)) * max(0, min(y+h, sh)-max(0, y)) / (sw*sh)
                         if area >= .75:
                             record["large_picture_hints"].append({**identity, "canvas_area_ratio": round(area, 4), "interpretation": "Inspect visually; may be legitimate source figure or flattened slide."})
+                words += onscreen_words(shape, box, sh, nested)
+            shown = format_word_count(words)
+            record["onscreen_word_count"] = shown
+            record["onscreen_word_cap"] = WORD_CAP
+            record["onscreen_word_cap_exempt"] = page == 1
+            if page != 1 and words > WORD_CAP:
+                record["warnings"].append({
+                    "code": "onscreen_text_over_word_cap",
+                    "word_count": shown,
+                    "cap": WORD_CAP,
+                })
             notes_part, notes = notes_body(zf, part)
             count = sum(not c.isspace() for c in notes)
             record.update({"notes_part": notes_part, "has_nonempty_body_notes": bool(count),
@@ -179,6 +294,10 @@ def audit(path):
         result["slide_count"] = len(pages)
         result["slides_without_body_notes"] = [p["page"] for p in pages if not p["has_nonempty_body_notes"]]
         result["slides_with_large_picture_hints"] = [p["page"] for p in pages if p["large_picture_hints"]]
+        result["slides_over_word_cap"] = [
+            p["page"] for p in pages
+            if any(item.get("code") == "onscreen_text_over_word_cap" for item in p["warnings"])
+        ]
     return result
 
 

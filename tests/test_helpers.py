@@ -17,6 +17,44 @@ def load(name):
 audit = load('audit_pptx')
 state = load('run_state')
 
+def write_deck(path, slides):
+    """slides: list of shape lists. shape keys: text, sz, and optional y (EMU)."""
+    ns = audit.NS
+    with zipfile.ZipFile(path, 'w') as z:
+        for index, shapes in enumerate(slides, 1):
+            body = []
+            for number, shape in enumerate(shapes, 2):
+                y = shape.get('y', 1000000)
+                text = shape['text']
+                sz = shape['sz']
+                body.append(
+                    '<p:sp>'
+                    f'<p:nvSpPr><p:cNvPr id="{number}" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+                    '<p:spPr><a:xfrm>'
+                    f'<a:off x="700000" y="{y}"/><a:ext cx="10000000" cy="400000"/>'
+                    '</a:xfrm></p:spPr>'
+                    '<p:txBody><a:bodyPr/><a:lstStyle/>'
+                    f'<a:p><a:r><a:rPr sz="{sz}"/><a:t>{text}</a:t></a:r></a:p>'
+                    '</p:txBody></p:sp>'
+                )
+            z.writestr(
+                f'ppt/slides/slide{index}.xml',
+                f'<p:sld xmlns:p="{ns["p"]}" xmlns:a="{ns["a"]}"><p:cSld><p:spTree>{"".join(body)}</p:spTree></p:cSld></p:sld>',
+            )
+        ids = ''.join(f'<p:sldId id="{255+i}" r:id="r{i}"/>' for i in range(1, len(slides)+1))
+        rels = ''.join(
+            f'<Relationship Id="r{i}" Type="x/slide" Target="slides/slide{i}.xml"/>'
+            for i in range(1, len(slides)+1)
+        )
+        z.writestr(
+            'ppt/presentation.xml',
+            f'<p:presentation xmlns:p="{ns["p"]}" xmlns:r="{ns["r"]}"><p:sldIdLst>{ids}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>',
+        )
+        z.writestr(
+            'ppt/_rels/presentation.xml.rels',
+            f'<Relationships xmlns="{ns["rel"]}">{rels}</Relationships>',
+        )
+
 class HelperTests(unittest.TestCase):
     def test_invalid_zip_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -67,5 +105,39 @@ class HelperTests(unittest.TestCase):
         self.assertFalse(report['slides_without_body_notes'])
         self.assertEqual(report['slides'][3]['native_chart_count'],1)
         self.assertTrue(all(s['native_text_shape_count']>2 for s in report['slides']))
+        self.assertTrue(report['slides'][0]['onscreen_word_cap_exempt'])
+        self.assertEqual(report['slides_over_word_cap'], [3, 5])
+        self.assertTrue(all('onscreen_word_count' in s for s in report['slides']))
+
+    def test_word_count_cjk_ratio(self):
+        self.assertEqual(audit.word_count('中'*80), 40)
+        self.assertEqual(audit.word_count('中'*81), 40.5)
+        self.assertEqual(audit.word_count('mean squared error'), 3)
+        self.assertEqual(audit.word_count('误差 MSE'), 2)
+
+    def test_word_cap_flags_overflow_not_cover_or_source_lines(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'words.pptx'
+            footer_y = 6200000
+            write_deck(path, [
+                [{'text': '中'*90, 'sz': 2200}],
+                [
+                    {'text': '中'*80, 'sz': 2200},
+                    {'text': '02', 'sz': 1300, 'y': footer_y},
+                    {'text': '来源：示意数据，不代表论文结果。'+'补'*40, 'sz': 1400, 'y': 1400000},
+                    {'text': '页底说明不计入屏幕字数。'+'注'*30, 'sz': 1500, 'y': footer_y},
+                ],
+                [{'text': '中'*81, 'sz': 2200}],
+                [{'text': '中'*90, 'sz': 1400, 'y': 1600000}],
+            ])
+            report = audit.audit(path)
+        self.assertEqual([s['onscreen_word_count'] for s in report['slides']], [45, 40, 40.5, 45])
+        self.assertEqual(report['slides_over_word_cap'], [3, 4])
+        self.assertTrue(report['slides'][0]['onscreen_word_cap_exempt'])
+        self.assertEqual(
+            [item['code'] for item in report['slides'][2]['warnings']],
+            ['onscreen_text_over_word_cap'],
+        )
+        self.assertFalse(report['slides'][1]['warnings'])
 
 if __name__ == '__main__':unittest.main()
