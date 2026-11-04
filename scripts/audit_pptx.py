@@ -2,8 +2,10 @@
 """Read-only OOXML inventory. This is not a visual or scientific QA verdict.
 
 Also estimates per-slide on-screen word counts against a 40-word cap (cover exempt),
-and warns when the lower half of the content band is largely empty. That warning
-does not change the process exit code.
+and warns when the lower half of the content band is largely empty. Algorithm-intent
+pages without a diagram shape, connector, picture, or 「缺图」 marker, and slides
+that show raw LaTeX, are warnings too. None of these warnings change the process
+exit code.
 """
 import argparse
 import hashlib
@@ -43,6 +45,26 @@ PAGE_NUMBER_TEXT = re.compile(r"\d{1,3}")
 SOURCE_MARK = re.compile(
     r"(来源\s*[:：]|出处\s*[:：]|图源\s*[:：]|资料来源|引自|Source\s*:|DOI\b|doi\s*:|arXiv|https?://)",
     re.IGNORECASE,
+)
+# Page text that should carry a native diagram, a picture, or an explicit gap.
+# Bare 「步骤」 and 「方法」 are omitted so discussion pages are not flagged.
+ALGORITHM_INTENT = re.compile(
+    r"算法|伪代码|训练流程|推理流程|推理步骤|解题流程|流程图|"
+    r"架构|模型结构|系统模块|"
+    r"encoder|decoder|transformer|mamba|pipeline",
+    re.IGNORECASE,
+)
+GAP_MARKER = re.compile(r"缺图")
+# On-screen LaTeX source. Unicode λ is allowed; a backslash command is not.
+# Keep aligned with scripts/inject_omml.py RAW_LATEX.
+RAW_LATEX = re.compile(
+    r"\\(?:frac|dfrac|tfrac|sum|prod|int|iint|iiint|lambda|alpha|beta|gamma|theta|sigma|"
+    r"mu|nu|omega|phi|psi|delta|epsilon|left|right|cdot|times|sqrt|mathbb|mathrm|mathbf|"
+    r"text|begin|end|overline|hat|bar|vec|partial|infty|leq|geq|neq|approx|equiv|"
+    r"subset|rightarrow|leftarrow)\b"
+    r"|\\[{}]"
+    r"|\^\{"
+    r"|_\{"
 )
 
 
@@ -195,6 +217,33 @@ def _is_slide_number(shape):
     return ph is not None and ph.get("type") == "sldNum"
 
 
+def is_diagram_object(shape):
+    """Connector, picture, or a real autoshape. Text boxes and empty rectangles are not.
+
+    Titles in this skill are often no-fill rectangles. Those must not satisfy an
+    algorithm page. A rounded rectangle, diamond, ellipse, or filled rectangle does.
+    """
+    if shape.tag in (tag("p", "cxnSp"), tag("p", "pic")):
+        return True
+    if shape.tag != tag("p", "sp"):
+        return False
+    if _is_slide_number(shape):
+        return False
+    locks = shape.find("p:nvSpPr/p:cNvSpPr", NS)
+    if locks is not None and locks.get("txBox") == "1":
+        return False
+    ph = shape.find("p:nvSpPr/p:nvPr/p:ph", NS)
+    if ph is not None:
+        return False
+    geom = shape.find("p:spPr/a:prstGeom", NS)
+    if geom is None:
+        return False
+    preset = geom.get("prst") or ""
+    if preset == "rect":
+        return shape.find("p:spPr/a:solidFill", NS) is not None
+    return bool(preset)
+
+
 def _occupies_content_band(shape):
     """Pictures, tables, charts, connectors, and groups count by geometry.
 
@@ -319,7 +368,14 @@ def audit(path):
             "connectors, and group boxes count by geometry. Group children are not measured; the "
             "group box is. Missing group transforms are not inferred. The check does not decide "
             "whether the fill is a conclusion, a figure note, a schematic, or a 缺图 page, and it "
-            "does not judge font size."
+            "does not judge font size. "
+            "algorithm_page_missing_diagram warns when on-screen text matches an algorithm, "
+            "architecture, or multi-step flow cue and the page has no connector, picture, "
+            "or non-textbox autoshape (a no-fill rectangle does not count) and does not "
+            "contain 「缺图」. raw_latex_on_screen warns when on-screen text, including math "
+            "text, contains a LaTeX command or ^{ / _{. Unicode letters such as λ do not. "
+            "office_math_count is the number of m:oMath elements. These warnings do not "
+            "change the process exit code."
         ),
         "warnings": [],
     }
@@ -359,9 +415,14 @@ def audit(path):
                 raise ValueError("Missing shape tree: " + part)
             record = {"page": page, "part": part, "native_text_shape_count": 0,
                       "picture_count": 0, "native_table_count": 0, "native_chart_count": 0,
-                      "office_math_count": 0, "native_texts": [], "large_picture_hints": [], "warnings": []}
+                      "office_math_count": 0, "diagram_object_count": 0, "connector_count": 0,
+                      "native_texts": [], "large_picture_hints": [], "warnings": []}
             words = 0.0
             for shape, nested in objects(tree):
+                if is_diagram_object(shape):
+                    record["diagram_object_count"] += 1
+                if shape.tag == tag("p", "cxnSp"):
+                    record["connector_count"] += 1
                 text = text_of(shape)
                 info = shape.find(".//p:cNvPr", NS)
                 identity = {"id": info.get("id") if info is not None else None,
@@ -406,6 +467,17 @@ def audit(path):
                     "content_band_css_px": [round(top / EMU_PER_PX, 2), round(bottom / EMU_PER_PX, 2)],
                     "lower_half_css_px": [round(mid / EMU_PER_PX, 2), round(bottom / EMU_PER_PX, 2)],
                 })
+            screen = text_of(tree)
+            record["algorithm_intent"] = bool(ALGORITHM_INTENT.search(screen))
+            record["has_gap_marker"] = bool(GAP_MARKER.search(screen))
+            if record["algorithm_intent"] and record["diagram_object_count"] == 0 and not record["has_gap_marker"]:
+                record["warnings"].append({"code": "algorithm_page_missing_diagram"})
+            raw_hits = RAW_LATEX.findall(screen)
+            if raw_hits:
+                record["warnings"].append({
+                    "code": "raw_latex_on_screen",
+                    "examples": sorted(set(raw_hits))[:6],
+                })
             notes_part, notes = notes_body(zf, part)
             count = sum(not c.isspace() for c in notes)
             record.update({"notes_part": notes_part, "has_nonempty_body_notes": bool(count),
@@ -422,6 +494,18 @@ def audit(path):
         result["slides_with_empty_lower_content_band"] = [
             p["page"] for p in pages
             if any(item.get("code") == "empty_lower_content_band" for item in p["warnings"])
+        ]
+        result["slides_missing_diagram"] = [
+            p["page"] for p in pages
+            if any(item.get("code") == "algorithm_page_missing_diagram" for item in p["warnings"])
+        ]
+        result["slides_with_raw_latex"] = [
+            p["page"] for p in pages
+            if any(item.get("code") == "raw_latex_on_screen" for item in p["warnings"])
+        ]
+        result["office_math_count"] = sum(p["office_math_count"] for p in pages)
+        result["slides_with_office_math"] = [
+            p["page"] for p in pages if p["office_math_count"]
         ]
     return result
 
