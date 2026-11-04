@@ -1,9 +1,11 @@
 """Small behavioral tests; fixtures are synthetic package fragments, not deliverable decks."""
 import importlib.util
 import json
+import sys
 from pathlib import Path
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import redirect_stdout
 from io import StringIO
@@ -108,6 +110,8 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(report['slides'][0]['onscreen_word_cap_exempt'])
         self.assertEqual(report['slides_over_word_cap'], [3, 5])
         self.assertTrue(all('onscreen_word_count' in s for s in report['slides']))
+        self.assertEqual(report['slides_with_empty_lower_content_band'], [])
+        self.assertIn('does not change the process exit code', report['claim_boundary'])
 
     def test_word_count_cjk_ratio(self):
         self.assertEqual(audit.word_count('中'*80), 40)
@@ -126,9 +130,13 @@ class HelperTests(unittest.TestCase):
                     {'text': '02', 'sz': 1300, 'y': footer_y},
                     {'text': '来源：示意数据，不代表论文结果。'+'补'*40, 'sz': 1400, 'y': 1400000},
                     {'text': '页底说明不计入屏幕字数。'+'注'*30, 'sz': 1500, 'y': footer_y},
+                    {'text': '来源：下半部占位，不计入屏幕字数。', 'sz': 1400, 'y': 4500000},
                 ],
                 [{'text': '中'*81, 'sz': 2200}],
-                [{'text': '中'*90, 'sz': 1400, 'y': 1600000}],
+                [
+                    {'text': '中'*90, 'sz': 1400, 'y': 1600000},
+                    {'text': '来源：下半部占位，不计入屏幕字数。', 'sz': 1400, 'y': 4500000},
+                ],
             ])
             report = audit.audit(path)
         self.assertEqual([s['onscreen_word_count'] for s in report['slides']], [45, 40, 40.5, 45])
@@ -138,6 +146,79 @@ class HelperTests(unittest.TestCase):
             [item['code'] for item in report['slides'][2]['warnings']],
             ['onscreen_text_over_word_cap'],
         )
+        self.assertEqual(
+            [item['code'] for item in report['slides'][3]['warnings']],
+            ['onscreen_text_over_word_cap'],
+        )
         self.assertFalse(report['slides'][1]['warnings'])
+        self.assertEqual(report['slides_with_empty_lower_content_band'], [])
+
+    def test_empty_lower_content_band_warns_without_changing_exit_code(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'band.pptx'
+            upper = [
+                {'text': '读入', 'sz': 2200, 'y': 1600000},
+                {'text': '编码', 'sz': 2200, 'y': 2100000},
+                {'text': '更新', 'sz': 2200, 'y': 2600000},
+                {'text': '评价', 'sz': 2200, 'y': 3100000},
+            ]
+            write_deck(path, [
+                list(upper),
+                list(upper),
+                list(upper) + [{'text': '结论：顺序依赖数据，不代表原文算法。', 'sz': 2000, 'y': 4500000}],
+                list(upper) + [{'text': '来源：示意', 'sz': 1200, 'y': 6200000}],
+                list(upper) + [{'text': '格子略过中线', 'sz': 2200, 'y': 3400000}],
+            ])
+            report = audit.audit(path)
+            self.assertEqual(report['slides_with_empty_lower_content_band'], [2, 4, 5])
+            self.assertFalse(any(
+                item['code'] == 'empty_lower_content_band' for item in report['slides'][0]['warnings']
+            ))
+            self.assertFalse(any(
+                item['code'] == 'empty_lower_content_band' for item in report['slides'][2]['warnings']
+            ))
+            self.assertEqual(
+                [item['code'] for item in report['slides'][1]['warnings']],
+                ['empty_lower_content_band'],
+            )
+            saved = sys.argv
+            try:
+                sys.argv = ['audit_pptx.py', str(path)]
+                with redirect_stdout(StringIO()):
+                    code = audit.main()
+            finally:
+                sys.argv = saved
+            self.assertEqual(code, 0)
+
+    def test_group_box_fills_lower_band_and_slide_number_does_not(self):
+        ns = audit.NS
+        tree = ET.fromstring(
+            f'<p:spTree xmlns:p="{ns["p"]}" xmlns:a="{ns["a"]}">'
+            '<p:sp><p:nvSpPr><p:cNvPr id="6" name="empty"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+            '<p:spPr><a:xfrm><a:off x="700000" y="4500000"/><a:ext cx="8000000" cy="800000"/></a:xfrm></p:spPr>'
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="2200"/><a:t> </a:t></a:r></a:p></p:txBody>'
+            '</p:sp>'
+            '<p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+            '<p:spPr><a:xfrm><a:off x="700000" y="1600000"/><a:ext cx="4000000" cy="800000"/></a:xfrm></p:spPr>'
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="2200"/><a:t>上</a:t></a:r></a:p></p:txBody>'
+            '</p:sp>'
+            '<p:sp><p:nvSpPr><p:cNvPr id="5" name="num"/><p:cNvSpPr/><p:nvPr><p:ph type="sldNum"/></p:nvPr></p:nvSpPr>'
+            '<p:spPr><a:xfrm><a:off x="700000" y="4500000"/><a:ext cx="4000000" cy="800000"/></a:xfrm></p:spPr>'
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="1200"/><a:t>2</a:t></a:r></a:p></p:txBody>'
+            '</p:sp>'
+            '<p:grpSp><p:nvGrpSpPr><p:cNvPr id="3" name="g"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
+            '<p:grpSpPr><a:xfrm><a:off x="700000" y="4500000"/><a:ext cx="8000000" cy="800000"/>'
+            '<a:chOff x="0" y="0"/><a:chExt cx="8000000" cy="800000"/></a:xfrm></p:grpSpPr>'
+            '<p:sp><p:nvSpPr><p:cNvPr id="4" name="c"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+            '<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1000000" cy="400000"/></a:xfrm></p:spPr>'
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="1800"/><a:t>示意</a:t></a:r></a:p></p:txBody>'
+            '</p:sp></p:grpSp></p:spTree>'
+        )
+        boxes = audit.content_band_boxes(tree)
+        self.assertEqual(len(boxes), 2)
+        self.assertEqual(boxes[1][2], 8000000)
+        self.assertGreaterEqual(boxes[1][1], 4000000)
+        self.assertFalse(audit.lower_content_band_is_empty(boxes, 6858000))
+        self.assertTrue(audit.lower_content_band_is_empty(boxes[:1], 6858000))
 
 if __name__ == '__main__':unittest.main()
