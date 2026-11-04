@@ -56,6 +56,26 @@ git clone https://github.com/121209/stanford-lecture-ppt-skill.git ~/.codex/skil
 
 仅要求“整理语料”“只出大纲”时，本skill不会擅自开始PPT生产。
 
+## 更新已安装的 skill
+
+**GitHub 上合并或推送更新，不会自动更新其他人电脑中已安装的副本。** 按上面的 `git clone` 安装后，使用者需要主动拉取。PowerShell：
+
+```powershell
+git -C "$env:USERPROFILE\.codex\skills\stanford-lecture-ppt" status --short
+git -C "$env:USERPROFILE\.codex\skills\stanford-lecture-ppt" pull --ff-only
+```
+
+macOS / Linux：
+
+```bash
+git -C ~/.codex/skills/stanford-lecture-ppt status --short
+git -C ~/.codex/skills/stanford-lecture-ppt pull --ff-only
+```
+
+目录不同就使用实际安装路径。若有本地修改或分支已经分叉，先备份并处理差异，不用强制重置或覆盖。ZIP 下载、复制文件或安装器下载得到的目录若没有 `.git`，不能用 `git pull` 更新；需要备份自己的修改和私有素材，再重新下载安装新版。
+
+Codex 会检测**本地技能文件**的变化；更新未显示时重启 Codex。这是本地检测，不是从 GitHub 自动拉取。参见 [OpenAI 官方技能文档](https://learn.chatgpt.com/docs/build-skills)。
+
 ## 流程
 
 材料阅读和事实核对 → 逐页大纲与素材映射 → 固定风格及制作路径 → 代表性内容样张 → 逐页任务与结果记录 → 全页质检、修复和备注 → 最终PPTX。
@@ -73,6 +93,14 @@ git clone https://github.com/121209/stanford-lecture-ppt-skill.git ~/.codex/skil
 ## 检查工具
 
 `audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`chart_helpers.py` 写原生条形图。`inject_omml.py` 注入带图片回退的原生 OMML：LaTeX 由内置编译器转换，pandoc 只是备用，回退图需要 matplotlib。
+
+使用内置 LaTeX 编译器或运行完整测试时，需 **Python 3.10 或以上**；Python 3.8 不支持编译器的联合类型语法。建议在虚拟环境中安装完整测试所需依赖：
+
+```bash
+python -m pip install python-pptx matplotlib lxml
+```
+
+LibreOffice 和 `pdftoppm` 用于可选的渲染回归测试；未安装时相关测试会跳过，不能把跳过视为渲染验收通过。
 
 ```bash
 python scripts/audit_pptx.py assets/demo.pptx
@@ -93,7 +121,7 @@ scripts/                 只读审计、制作状态、原生示意图与 OMML �
 assets/demo.pptx         匿名可编辑示例（第 7 页为图优先示例）
 assets/diagram-samples/  三页匿名示意图与公式样张
 assets/previews/         示例与样张的渲染预览
-tests/                   标准库测试
+tests/                   辅助工具与PPTX包结构回归测试
 docs/ITERATION.md        使用、反馈、分流、验证与合并
 .github/                 Issue 表单与 PR 检查清单
 ```

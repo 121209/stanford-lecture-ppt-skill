@@ -2,6 +2,8 @@
 
 屏幕上的公式要能被听众读懂，并且不能露出 LaTeX 源码。`python-pptx` 在 Linux 上写不好复杂公式，所以按下面的顺序做。验收口径见 [验收](qa.md)。
 
+环境要求：内置 LaTeX 编译器使用 Python 3.10+ 的联合类型语法，不能在 Python 3.8 中运行。生成公式图片回退另需 matplotlib；完整验证还需 python-pptx 和 lxml。优先在虚拟环境中安装，具体命令见 [README](../README.md#检查工具)。
+
 ## 选用顺序
 
 | 顺序 | 做法 | LibreOffice 里怎么算通过 |

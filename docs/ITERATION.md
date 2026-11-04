@@ -11,6 +11,8 @@
 5. **验证。** 改了脚本就跑单元测试；涉及质检或示例课件时，对样例跑 `audit_pptx.py`。
 6. **合并。** 合入 `main` 后，若制作行为有变化，在 `CHANGELOG.md` 写一节。
 
+合并只更新 GitHub 仓库，不会主动更新使用者已经安装的本地副本。维护者与使用者都应按 [README 的更新说明](../README.md#更新已安装的-skill) 同步自己的安装目录；保留私有素材与本地改动。
+
 仓库不开放空白 issue，请用这两个表单。模板文件：
 
 - [`.github/ISSUE_TEMPLATE/skill-feedback.yml`](../.github/ISSUE_TEMPLATE/skill-feedback.yml)
