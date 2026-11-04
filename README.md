@@ -10,7 +10,7 @@
 
 [下载可编辑示例 PPTX](assets/demo.pptx)
 
-全新制作的6页匿名示例，展示封面、讲义式层次、公式解释、原生图表、论文工作／阅读收获双栏与总结。所有示例数值均为教学示意，不是论文实验结果；不含真实姓名、学校、日期或私人研究材料。
+匿名示例展示封面、讲义式层次、公式解释、原生图表、论文工作／阅读收获双栏、总结，以及一页图优先的四步流程。前 6 页的内容保持原样，第 7 页只增加示意图。所有示例数值均为教学示意，不是论文实验结果；不含真实姓名、学校、日期或私人研究材料。`assets/diagram-samples/figure-first.pptx` 另有三页匿名样张：四步流程、双栏架构、公式图加符号说明。
 
 ![封面](assets/previews/slide-01.png)
 ![层次文字](assets/previews/slide-02.png)
@@ -18,6 +18,13 @@
 ![图表与说明](assets/previews/slide-04.png)
 ![工作与收获双栏](assets/previews/slide-05.png)
 ![总结](assets/previews/slide-06.png)
+![图优先流程](assets/previews/slide-07.png)
+
+示意图样张：
+
+![四步流程](assets/previews/diagram-01-flow.png)
+![双栏架构](assets/previews/diagram-02-architecture.png)
+![公式与符号说明](assets/previews/diagram-03-formula.png)
 
 ## 安装
 
@@ -65,15 +72,16 @@ git clone https://github.com/121209/stanford-lecture-ppt-skill.git ~/.codex/skil
 
 ## 检查工具
 
-两个Python辅助脚本仅依赖标准库。它们**不是独立PPT生成引擎**，也不能代替视觉和科学核验。
+`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`inject_omml.py` 用标准库注入 OMML，pandoc 可选。
 
 ```bash
 python scripts/audit_pptx.py assets/demo.pptx
+python scripts/audit_pptx.py assets/diagram-samples/figure-first.pptx
 python scripts/run_state.py --help
 python -m unittest discover -s tests -v
 ```
 
-`audit_pptx.py` 按实际页序检查对象、备注、外部关系、越界与大图线索。`run_state.py` 记录确认门、逐页派发、素材／预览hash和检查状态。完整用法见 [制作流程](references/workflow.md)。
+`audit_pptx.py` 按实际页序检查对象、备注、外部关系、越界、大图线索、屏幕字数、内容带下半部、算法页是否有形状，以及屏幕上有没有 LaTeX 源码。后几项是警告，不改变退出码。`run_state.py` 记录确认门、逐页派发、素材／预览 hash 和检查状态。完整用法见 [制作流程](references/workflow.md)、[示意图](references/diagrams.md) 和 [公式](references/formulas.md)。
 
 ## 文件结构
 
@@ -81,9 +89,10 @@ python -m unittest discover -s tests -v
 SKILL.md                 技能入口与边界
 agents/openai.yaml       Codex界面描述
 references/              风格、流程、内容、验收与来源
-scripts/                 只读PPTX审计及制作状态记录
-assets/demo.pptx         匿名可编辑示例
-assets/previews/         示例真实渲染预览
+scripts/                 只读审计、制作状态、原生示意图与 OMML 注入
+assets/demo.pptx         匿名可编辑示例（第 7 页为图优先示例）
+assets/diagram-samples/  三页匿名示意图与公式样张
+assets/previews/         示例与样张的渲染预览
 tests/                   标准库测试
 docs/ITERATION.md        使用、反馈、分流、验证与合并
 .github/                 Issue 表单与 PR 检查清单

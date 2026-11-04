@@ -1,6 +1,7 @@
 """Small behavioral tests; fixtures are synthetic package fragments, not deliverable decks."""
 import importlib.util
 import json
+import shutil
 import sys
 from pathlib import Path
 import tempfile
@@ -19,34 +20,24 @@ def load(name):
 audit = load('audit_pptx')
 state = load('run_state')
 
-def write_deck(path, slides):
-    """slides: list of shape lists. shape keys: text, sz, and optional y (EMU)."""
+def write_raw_deck(path, bodies):
+    """bodies: list of shape-tree inner XML strings, one per slide."""
     ns = audit.NS
     with zipfile.ZipFile(path, 'w') as z:
-        for index, shapes in enumerate(slides, 1):
-            body = []
-            for number, shape in enumerate(shapes, 2):
-                y = shape.get('y', 1000000)
-                text = shape['text']
-                sz = shape['sz']
-                body.append(
-                    '<p:sp>'
-                    f'<p:nvSpPr><p:cNvPr id="{number}" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
-                    '<p:spPr><a:xfrm>'
-                    f'<a:off x="700000" y="{y}"/><a:ext cx="10000000" cy="400000"/>'
-                    '</a:xfrm></p:spPr>'
-                    '<p:txBody><a:bodyPr/><a:lstStyle/>'
-                    f'<a:p><a:r><a:rPr sz="{sz}"/><a:t>{text}</a:t></a:r></a:p>'
-                    '</p:txBody></p:sp>'
-                )
+        for index, body in enumerate(bodies, 1):
             z.writestr(
                 f'ppt/slides/slide{index}.xml',
-                f'<p:sld xmlns:p="{ns["p"]}" xmlns:a="{ns["a"]}"><p:cSld><p:spTree>{"".join(body)}</p:spTree></p:cSld></p:sld>',
+                (
+                    f'<p:sld xmlns:p="{ns["p"]}" xmlns:a="{ns["a"]}" '
+                    f'xmlns:r="{ns["r"]}" xmlns:m="{ns["m"]}">'
+                    f'<p:cSld><p:spTree>{body}</p:spTree></p:cSld></p:sld>'
+                ),
             )
-        ids = ''.join(f'<p:sldId id="{255+i}" r:id="r{i}"/>' for i in range(1, len(slides)+1))
+        count = len(bodies)
+        ids = ''.join(f'<p:sldId id="{255+i}" r:id="r{i}"/>' for i in range(1, count+1))
         rels = ''.join(
             f'<Relationship Id="r{i}" Type="x/slide" Target="slides/slide{i}.xml"/>'
-            for i in range(1, len(slides)+1)
+            for i in range(1, count+1)
         )
         z.writestr(
             'ppt/presentation.xml',
@@ -56,6 +47,63 @@ def write_deck(path, slides):
             'ppt/_rels/presentation.xml.rels',
             f'<Relationships xmlns="{ns["rel"]}">{rels}</Relationships>',
         )
+
+def write_deck(path, slides):
+    """slides: list of shape lists. shape keys: text, sz, and optional y (EMU)."""
+    bodies = []
+    for shapes in slides:
+        body = []
+        for number, shape in enumerate(shapes, 2):
+            y = shape.get('y', 1000000)
+            text = shape['text']
+            sz = shape['sz']
+            body.append(
+                '<p:sp>'
+                f'<p:nvSpPr><p:cNvPr id="{number}" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+                '<p:spPr><a:xfrm>'
+                f'<a:off x="700000" y="{y}"/><a:ext cx="10000000" cy="400000"/>'
+                '</a:xfrm></p:spPr>'
+                '<p:txBody><a:bodyPr/><a:lstStyle/>'
+                f'<a:p><a:r><a:rPr sz="{sz}"/><a:t>{text}</a:t></a:r></a:p>'
+                '</p:txBody></p:sp>'
+            )
+        bodies.append(''.join(body))
+    write_raw_deck(path, bodies)
+
+def raw_textbox(number, text, y=1600000, sz=2200):
+    return (
+        '<p:sp>'
+        f'<p:nvSpPr><p:cNvPr id="{number}" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm>'
+        f'<a:off x="700000" y="{y}"/><a:ext cx="8000000" cy="500000"/>'
+        '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>'
+        f'<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="{sz}"/><a:t>{text}</a:t></a:r></a:p></p:txBody>'
+        '</p:sp>'
+    )
+
+def raw_round(number, text):
+    return (
+        '<p:sp>'
+        f'<p:nvSpPr><p:cNvPr id="{number}" name="n"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="700000" y="1800000"/><a:ext cx="2200000" cy="800000"/></a:xfrm>'
+        '<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>'
+        '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'
+        '<a:ln><a:solidFill><a:srgbClr val="C00000"/></a:solidFill></a:ln></p:spPr>'
+        f'<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="2000"/><a:t>{text}</a:t></a:r></a:p></p:txBody>'
+        '</p:sp>'
+    )
+
+RAW_CONNECTOR = (
+    '<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="9" name="c"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr>'
+    '<p:spPr><a:xfrm><a:off x="3000000" y="2100000"/><a:ext cx="400000" cy="0"/></a:xfrm>'
+    '<a:prstGeom prst="line"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>'
+)
+RAW_PICTURE = (
+    '<p:pic><p:nvPicPr><p:cNvPr id="10" name="p"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>'
+    '<p:blipFill><a:blip r:embed="rId9"/></p:blipFill>'
+    '<p:spPr><a:xfrm><a:off x="700000" y="1800000"/><a:ext cx="4000000" cy="1800000"/></a:xfrm>'
+    '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>'
+)
 
 class HelperTests(unittest.TestCase):
     def test_invalid_zip_rejected(self):
@@ -103,7 +151,7 @@ class HelperTests(unittest.TestCase):
 
     def test_demo_native_objects(self):
         report=audit.audit(ROOT/'assets/demo.pptx')
-        self.assertEqual(report['slide_count'],6)
+        self.assertEqual(report['slide_count'],7)
         self.assertFalse(report['slides_without_body_notes'])
         self.assertEqual(report['slides'][3]['native_chart_count'],1)
         self.assertTrue(all(s['native_text_shape_count']>2 for s in report['slides']))
@@ -111,6 +159,12 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(report['slides_over_word_cap'], [3, 5])
         self.assertTrue(all('onscreen_word_count' in s for s in report['slides']))
         self.assertEqual(report['slides_with_empty_lower_content_band'], [])
+        self.assertEqual(report['slides_missing_diagram'], [])
+        self.assertEqual(report['slides_with_raw_latex'], [])
+        self.assertFalse(any(s['algorithm_intent'] for s in report['slides'][:6]))
+        self.assertTrue(report['slides'][6]['algorithm_intent'])
+        self.assertGreater(report['slides'][6]['diagram_object_count'], 0)
+        self.assertGreater(report['slides'][6]['connector_count'], 0)
         self.assertIn('does not change the process exit code', report['claim_boundary'])
 
     def test_word_count_cjk_ratio(self):
@@ -220,5 +274,141 @@ class HelperTests(unittest.TestCase):
         self.assertGreaterEqual(boxes[1][1], 4000000)
         self.assertFalse(audit.lower_content_band_is_empty(boxes, 6858000))
         self.assertTrue(audit.lower_content_band_is_empty(boxes[:1], 6858000))
+
+    def test_algorithm_page_needs_diagram_gap_or_picture(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'algo.pptx'
+            write_raw_deck(path, [
+                raw_textbox(2, '训练流程只有文字'),
+                raw_textbox(2, '训练流程') + raw_round(3, '读入'),
+                raw_textbox(2, '架构说明') + RAW_CONNECTOR,
+                raw_textbox(2, '模型结构') + RAW_PICTURE,
+                raw_textbox(2, '算法页缺图：原文图尚未取得。'),
+                raw_textbox(2, '下一步讨论收获'),
+                raw_textbox(2, '推理流程') + raw_textbox(3, '来源：下半部占位。', y=4500000),
+            ])
+            report = audit.audit(path)
+            self.assertEqual(report['slides_missing_diagram'], [1, 7])
+            self.assertGreater(report['slides'][1]['diagram_object_count'], 0)
+            self.assertGreater(report['slides'][2]['connector_count'], 0)
+            self.assertEqual(report['slides'][3]['picture_count'], 1)
+            self.assertTrue(report['slides'][4]['has_gap_marker'])
+            self.assertFalse(report['slides'][5]['algorithm_intent'])
+            self.assertEqual(
+                [item['code'] for item in report['slides'][0]['warnings']],
+                ['algorithm_page_missing_diagram'],
+            )
+            saved = sys.argv
+            try:
+                sys.argv = ['audit_pptx.py', str(path)]
+                with redirect_stdout(StringIO()):
+                    code = audit.main()
+            finally:
+                sys.argv = saved
+            self.assertEqual(code, 0)
+
+    def test_raw_latex_warns_and_omml_is_counted(self):
+        omml = (
+            '<p:sp><p:nvSpPr><p:cNvPr id="4" name="m"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>'
+            '<p:spPr><a:xfrm><a:off x="700000" y="1800000"/><a:ext cx="5000000" cy="600000"/></a:xfrm>'
+            '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p>'
+            '<m:oMath><m:r><m:t>λ</m:t></m:r></m:oMath>'
+            '</a:p></p:txBody></p:sp>'
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'math.pptx'
+            write_raw_deck(path, [
+                raw_textbox(2, 'λ(t)=α，只说明符号'),
+                raw_textbox(2, r'损失 \frac{1}{2} 与 x^{2}')
+                + raw_textbox(3, '下半部有一句说明。', y=4500000),
+                omml + raw_textbox(5, '下半部有一句说明。', y=4500000),
+            ])
+            report = audit.audit(path)
+        self.assertEqual(report['slides_with_raw_latex'], [2])
+        latex_warning = report['slides'][1]['warnings'][0]
+        self.assertEqual(latex_warning['code'], 'raw_latex_on_screen')
+        self.assertIn(r'\frac', latex_warning['examples'])
+        self.assertIn('^{', latex_warning['examples'])
+        self.assertEqual(report['slides'][0]['warnings'], [])
+        self.assertEqual(report['office_math_count'], 1)
+        self.assertEqual(report['slides_with_office_math'], [3])
+
+    def test_inject_omml_replaces_placeholder_and_rejects_source(self):
+        inject = load('inject_omml')
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            src = folder/'in.pptx'
+            write_deck(src, [[{'text': '{{MATH:rate}}', 'sz': 2200, 'y': 1800000}]])
+            dest = folder/'out.pptx'
+            inject.inject_pptx(src, {
+                'rate': {'runs': [{'t': 'λ'}, {'t': '='}, {'sup': {'base': 'e', 'sup': '−t'}}]},
+            }, dest)
+            report = audit.audit(dest)
+            self.assertEqual(report['office_math_count'], 1)
+            self.assertEqual(report['slides_with_raw_latex'], [])
+            blob = dest.read_bytes()
+            self.assertNotIn(b'{{MATH:', blob)
+            self.assertNotIn(b'\\lambda', blob)
+            bad = folder/'bad.pptx'
+            with self.assertRaises(ValueError):
+                inject.inject_pptx(src, {'rate': {'runs': [{'t': r'\lambda'}]}}, bad)
+            self.assertFalse(bad.exists())
+            pandoc_out = folder/'pandoc.pptx'
+            if shutil.which('pandoc'):
+                inject.inject_pptx(src, {'rate': {'latex': r'\lambda(t)=\alpha'}}, pandoc_out)
+                self.assertEqual(audit.audit(pandoc_out)['slides_with_raw_latex'], [])
+            else:
+                with self.assertRaises(ValueError) as caught:
+                    inject.inject_pptx(src, {'rate': {'latex': r'\lambda(t)=\alpha'}}, pandoc_out)
+                self.assertIn('pandoc', str(caught.exception))
+                self.assertFalse(pandoc_out.exists())
+
+    def test_diagram_helper_builds_audited_flow(self):
+        try:
+            import pptx  # noqa: F401
+        except ImportError:
+            self.skipTest('python-pptx is not installed')
+        helpers = load('diagram_helpers')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'flow.pptx'
+            helpers.build_slide_from_spec({
+                'title': '训练流程：四步示意',
+                'layout': 'row',
+                'nodes': helpers.FLOW_NODES,
+                'edges': helpers.FLOW_EDGES,
+                'conclusion': '顺序是汇报归纳，不是原文算法。',
+                'source': '来源：匿名示意，不是论文实验。',
+                'page': '02',
+            }, path)
+            report = audit.audit(path)
+        self.assertEqual(report['slides_missing_diagram'], [])
+        self.assertEqual(report['slides_with_raw_latex'], [])
+        self.assertEqual(report['slides_over_word_cap'], [])
+        self.assertEqual(report['slides_with_empty_lower_content_band'], [])
+        self.assertGreater(report['slides'][0]['connector_count'], 0)
+        self.assertTrue(report['slides'][0]['algorithm_intent'])
+        with self.assertRaises(ValueError):
+            helpers._check_graph(
+                [{'id': 'n%d' % i, 'label': '点'} for i in range(13)],
+                [],
+            )
+
+    def test_checked_in_diagram_samples(self):
+        path = ROOT/'assets/diagram-samples/figure-first.pptx'
+        self.assertTrue(path.is_file(), 'missing anonymous diagram samples')
+        report = audit.audit(path)
+        self.assertEqual(report['slide_count'], 3)
+        self.assertEqual(report['slides_missing_diagram'], [])
+        self.assertEqual(report['slides_with_raw_latex'], [])
+        self.assertEqual(report['slides_over_word_cap'], [])
+        self.assertEqual(report['slides_with_empty_lower_content_band'], [])
+        self.assertTrue(report['slides'][0]['algorithm_intent'])
+        self.assertTrue(report['slides'][1]['algorithm_intent'])
+        self.assertGreater(report['slides'][0]['connector_count'], 0)
+        self.assertGreater(report['slides'][1]['diagram_object_count'], 0)
+        self.assertGreater(report['slides'][2]['picture_count'], 0)
+        self.assertFalse(report['slides'][2]['algorithm_intent'])
+        self.assertFalse(report['slides_without_body_notes'])
 
 if __name__ == '__main__':unittest.main()
