@@ -162,8 +162,53 @@ def _shape_kind(name, api):
     return kinds[name]
 
 
+def _text_units(label):
+    units = 0.0
+    for char in label:
+        if "\u3400" <= char <= "\u9fff":
+            units += 1.0
+        elif char.isspace():
+            units += 0.35
+        else:
+            units += 0.55
+    return max(units, 0.5)
+
+
+def _diamond_font_size(label, width):
+    """Shrink so one line fits the diamond's center band. 20pt is the body size."""
+    usable = max(width * 0.55, emu(0.4))
+    size = 20
+    while size > 12 and _text_units(label) * (size / 72.0) * EMU_IN > usable:
+        size -= 1
+    return size
+
+
+def _fit_diamond_box(label, x, y, w, h):
+    """Widen a narrow diamond just enough for a 14pt one-line label."""
+    need = int(_text_units(label) * (14 / 72.0) * EMU_IN / 0.55) + emu(0.12)
+    target = min(max(w, need), emu(3.2))
+    if target > w:
+        x -= (target - w) // 2
+        w = target
+    if x < 0:
+        x = 0
+    if x + w > SLIDE_W:
+        x = max(0, SLIDE_W - w)
+    return x, y, w, h
+
+
+def _diamond_body(text_frame, api):
+    qn = api["qn"]
+    body = text_frame._txBody.find(qn("a:bodyPr"))
+    body.set("wrap", "none")
+    for inset in ("lIns", "tIns", "rIns", "bIns"):
+        body.set(inset, "0")
+
+
 def add_node(slide, kind, x, y, w, h, label, accent, api):
     colors = _colors(api)
+    if kind == "diamond":
+        x, y, w, h = _fit_diamond_box(label, x, y, w, h)
     shape = slide.shapes.add_shape(
         _shape_kind(kind, api), api["Emu"](x), api["Emu"](y), api["Emu"](w), api["Emu"](h)
     )
@@ -173,26 +218,31 @@ def add_node(slide, kind, x, y, w, h, label, accent, api):
     shape.line.width = api["Pt"](1.75)
     _strip_style(shape, api["qn"])
     frame = shape.text_frame
-    frame.word_wrap = True
+    frame.word_wrap = kind != "diamond"
     _anchor(frame, api, "ctr")
+    if kind == "diamond":
+        _diamond_body(frame, api)
     paragraph = frame.paragraphs[0]
     paragraph.alignment = api["PP_ALIGN"].CENTER
     paragraph.text = label
-    _style_run(paragraph.runs[0], 20, colors["ink"], api)
+    size = _diamond_font_size(label, w) if kind == "diamond" else 20
+    _style_run(paragraph.runs[0], size, colors["ink"], api)
     return shape
 
 
 def add_arrow(slide, x1, y1, x2, y2, api):
     colors = _colors(api)
     qn = api["qn"]
+    vertical = abs(x2 - x1) < abs(y2 - y1)
     shape = slide.shapes.add_connector(
         api["MSO_CONNECTOR"].STRAIGHT,
         api["Emu"](x1), api["Emu"](y1), api["Emu"](x2), api["Emu"](y2),
     )
     shape.line.color.rgb = colors["ink"]
-    shape.line.width = api["Pt"](1.5)
+    shape.line.width = api["Pt"](2.25 if vertical else 1.5)
     line = shape.line._ln
-    tail = line.makeelement(qn("a:tailEnd"), {"type": "triangle", "w": "med", "len": "med"})
+    head = "lg" if vertical else "med"
+    tail = line.makeelement(qn("a:tailEnd"), {"type": "triangle", "w": head, "len": head})
     line.append(tail)
     _strip_style(shape, api["qn"])
     return shape
@@ -233,8 +283,12 @@ def _positions(nodes, region, layout):
         positions = {}
         for i, group in enumerate(groups):
             x = left + i * (col_w + gutter)
-            gap_y = emu(0.18) if len(group) > 1 else 0
-            node_h = (height - gap_y * (len(group) - 1)) // len(group)
+            # Vertical connectors are the gap. 0.18in left only the arrowhead.
+            gap_y = emu(0.50) if len(group) > 1 else 0
+            node_h = (height - gap_y * (len(group) - 1)) // max(len(group), 1)
+            if len(group) > 1 and node_h < emu(0.72):
+                gap_y = max(emu(0.36), (height - emu(0.72) * len(group)) // (len(group) - 1))
+                node_h = (height - gap_y * (len(group) - 1)) // len(group)
             y = top
             for node in group:
                 positions[node["id"]] = (x, y, col_w, node_h)
@@ -305,7 +359,7 @@ def populate_content_slide(slide, spec):
     layout = spec.get("layout") or "row"
     region = spec.get("region")
     if region is None:
-        region = (emu(0.7), emu(2.15), emu(11.9), emu(2.35)) if layout == "columns" else (
+        region = (emu(0.7), emu(1.70), emu(11.9), emu(3.20)) if layout == "columns" else (
             emu(0.7), emu(1.95), emu(11.9), emu(1.15)
         )
     else:

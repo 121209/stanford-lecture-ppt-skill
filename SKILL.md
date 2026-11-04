@@ -38,7 +38,7 @@ description: "制作或修改斯坦福CS课程讲义风的组会、论文阅读�
    - 渲染后自检：逐页数屏幕字数并记入 `record --qa-note`（如“p3: 36词”），超限页不得 record。
    - 内容带下半部：四格流程图或同类中等高度版式若在内容带上半部结束，下半部不得整段留空。用一行结论、一句读图说明，或第二行小示意图补上。禁止为此缩小字号，或把更多正文塞进屏幕。没有原图的结果页必须放原生示意图块，或单独做一页明确标「缺图」的缺口页，不能只用文字条。结构审计对大片空白的下半内容带只记 warning（`empty_lower_content_band`），退出码不变，不能代替逐页看版式。
    - 图优先：算法、架构、多步流程页必须是 `native_diagram`，或版心明确写「缺图」。禁止纯文字算法页。决策表、节点上限和引擎顺序见 [示意图](references/diagrams.md)。优先级是可编辑原生形状，然后论文原图，然后手绘矢量，然后仅在用户明示时的 AI 概念草稿，最后才是缺图页。
-   - 公式：屏幕禁止出现 LaTeX 源码（`\frac`、`\sum`、`\lambda`、`^{`、`_{`）。优先 OMML，Linux 上用高 DPI 数学图兜底，符号说明仍用可编辑文字。路径见 [公式](references/formulas.md)。
+   - 公式：屏幕禁止出现 LaTeX 源码（`\frac`、`\sum`、`\lambda`、`^{`、`_{`）。优先带高 DPI 图片回退的原生 OMML，Linux 上也可以直接用高 DPI 数学图，符号说明仍用可编辑文字。路径见 [公式](references/formulas.md)。
 3. 文字、关键公式、表格、逻辑图默认可选中修改；原论文复杂证据图保留清晰度和出处，不生成相似数据图代替原图。关键公式的可编辑路径以 [公式](references/formulas.md) 为准，不能把 ASCII 源码当成已经可编辑。
 4. 屏幕保留结论及必要条件；解释、推导、局限、例子与过渡写入同页演讲者备注。制作任务须交付实际文件，不止修改建议。
 5. 近期学习汇报侧重读了什么、论文之间的联系和个人收获；单篇精读才展开方法推导。没有记录的阅读日期、复现经历和实验成果不得编造。
@@ -60,6 +60,6 @@ description: "制作或修改斯坦福CS课程讲义风的组会、论文阅读�
 
 Linux 组会默认用 python-pptx 画原生形状和连接线（`scripts/diagram_helpers.py`）。Mermaid 落到原生形状是可选增强。环境里没有 officecli、Go、TikZ 或生图 API 时，仍走形状路径，不改成整页 PNG。只有用户明确要求生图、AI 示意图或 graphical abstract 时才允许概念草稿；草稿不是实验证据。
 
-`scripts/audit_pptx.py` 与 `scripts/run_state.py` 只依赖 Python 标准库，不生成 PPT。`scripts/diagram_helpers.py` 另需 python-pptx，用来写形状。`scripts/inject_omml.py` 用标准库把 `{{MATH:id}}` 换成 OMML，pandoc 只是可选。完整制作仍需具备原生 PPTX 生成与渲染能力的工具。未安装 codex-ppt 也可使用本 skill；不把其整页图片组装器用于可编辑分支。
+`scripts/audit_pptx.py` 与 `scripts/run_state.py` 只依赖 Python 标准库，不生成 PPT。`scripts/diagram_helpers.py` 另需 python-pptx，用来写形状。`scripts/inject_omml.py` 把 `{{MATH:id}}` 换成带图片回退的原生 OMML，pandoc 可选，画回退图需要 matplotlib。完整制作仍需具备原生 PPTX 生成与渲染能力的工具。未安装 codex-ppt 也可使用本 skill；不把其整页图片组装器用于可编辑分支。
 
 不默许外发私人材料、使用付费API、读取密钥或发布内容。能力或素材确实缺失时报告受影响页和限制，不私自替造证据或降低编辑性。

@@ -2,10 +2,11 @@
 """Read-only OOXML inventory. This is not a visual or scientific QA verdict.
 
 Also estimates per-slide on-screen word counts against a 40-word cap (cover exempt),
-and warns when the lower half of the content band is largely empty. Algorithm-intent
-pages without a diagram shape, connector, picture, or 「缺图」 marker, and slides
-that show raw LaTeX, are warnings too. None of these warnings change the process
-exit code.
+and warns when the lower half of the content band is largely empty. A content slide
+whose title names an algorithm, method, architecture, or pipeline, and that has no
+diagram, picture, table, chart, or 「缺图」 marker, is a warning. So is raw LaTeX,
+and OMML that is not PowerPoint's a14 choice plus a picture fallback. None of these
+warnings change the process exit code.
 """
 import argparse
 import hashlib
@@ -25,6 +26,7 @@ NS = {
     "c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
     "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
     "mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+    "a14": "http://schemas.microsoft.com/office/drawing/2010/main",
 }
 EMU_PER_PX = 9525
 WORD_CAP = 40
@@ -46,14 +48,17 @@ SOURCE_MARK = re.compile(
     r"(来源\s*[:：]|出处\s*[:：]|图源\s*[:：]|资料来源|引自|Source\s*:|DOI\b|doi\s*:|arXiv|https?://)",
     re.IGNORECASE,
 )
-# Page text that should carry a native diagram, a picture, or an explicit gap.
-# Bare 「步骤」 and 「方法」 are omitted so discussion pages are not flagged.
+# Title text that should carry a native diagram, a picture, a table, a chart, or 「缺图」.
+# Match concepts, not model names: a title may say Mamba or Transformer without this firing.
+# Bare 「步骤」 stays out so a discussion title is not flagged. 「方法」 is included because
+# matching is limited to the title.
 ALGORITHM_INTENT = re.compile(
-    r"算法|伪代码|训练流程|推理流程|推理步骤|解题流程|流程图|"
-    r"架构|模型结构|系统模块|"
-    r"encoder|decoder|transformer|mamba|pipeline",
+    r"算法|伪代码|方法|训练流程|推理流程|推理步骤|解题流程|流程图|流程|"
+    r"架构|框架|模型结构|系统模块|"
+    r"\b(?:encoder|decoder|pipeline|framework|architecture|algorithm|method)s?\b",
     re.IGNORECASE,
 )
+TITLE_PLACEHOLDERS = {"title", "ctrTitle"}
 GAP_MARKER = re.compile(r"缺图")
 # On-screen LaTeX source. Unicode λ is allowed; a backslash command is not.
 # Keep aligned with scripts/inject_omml.py RAW_LATEX.
@@ -322,6 +327,84 @@ def lower_content_band_is_empty(boxes, slide_h, min_extent=CONTENT_BAND_MIN_EXTE
     return upper and not lower
 
 
+def slide_title_text(tree, slide_h):
+    """Title placeholder text, otherwise the topmost non-page-number text shape.
+
+    Group children are skipped: their offsets are often local to the group.
+    """
+    placeholders = []
+    topmost = None
+    for shape, nested in objects(tree):
+        if nested or shape.tag != tag("p", "sp") or _is_slide_number(shape):
+            continue
+        text = text_of(shape).strip()
+        if not text or PAGE_NUMBER_TEXT.fullmatch(text):
+            continue
+        ph = shape.find("p:nvSpPr/p:nvPr/p:ph", NS)
+        if ph is not None and ph.get("type") in TITLE_PLACEHOLDERS:
+            placeholders.append(text)
+            continue
+        box = geometry(shape)
+        y = box[1] if box else 0
+        if topmost is None or y < topmost[0]:
+            topmost = (y, text)
+    if placeholders:
+        return "\n".join(placeholders)
+    if topmost:
+        return topmost[1]
+    return ""
+
+
+def _parent_map(root):
+    parents = {}
+    for parent in root.iter():
+        for child in list(parent):
+            parents[child] = parent
+    return parents
+
+
+def _requires_a14(choice):
+    required = (choice.get("Requires") or "").replace(",", " ").split()
+    return "a14" in required
+
+
+def omml_has_picture_fallback(omath, parents):
+    """True when oMath sits in Choice/a14:m/oMathPara and Fallback has a picture."""
+    node = omath
+    saw_para = False
+    saw_a14 = False
+    choice = None
+    alternate = None
+    while node is not None:
+        if node.tag == tag("m", "oMathPara"):
+            saw_para = True
+        elif node.tag == tag("a14", "m"):
+            saw_a14 = True
+        elif node.tag == tag("mc", "Choice") and _requires_a14(node):
+            choice = node
+        elif node.tag == tag("mc", "AlternateContent"):
+            alternate = node
+            break
+        node = parents.get(node)
+    if not (saw_para and saw_a14 and choice is not None and alternate is not None):
+        return False
+    fallback = next((child for child in list(alternate) if child.tag == tag("mc", "Fallback")), None)
+    if fallback is None:
+        return False
+    return fallback.find(".//" + tag("a", "blip")) is not None
+
+
+def office_math_fallback_warning(tree):
+    parents = _parent_map(tree)
+    missing = 0
+    for omath in tree.iter(tag("m", "oMath")):
+        if not omml_has_picture_fallback(omath, parents):
+            missing += 1
+    if not missing:
+        return None
+    return {"code": "office_math_missing_fallback", "count": missing}
+
+
 def notes_body(zf, slide_part):
     rels = relationships(zf, slide_part)
     rel = next((r for r in rels.values() if r.get("Type", "").endswith("/notesSlide")), None)
@@ -369,13 +452,20 @@ def audit(path):
             "group box is. Missing group transforms are not inferred. The check does not decide "
             "whether the fill is a conclusion, a figure note, a schematic, or a 缺图 page, and it "
             "does not judge font size. "
-            "algorithm_page_missing_diagram warns when on-screen text matches an algorithm, "
-            "architecture, or multi-step flow cue and the page has no connector, picture, "
-            "or non-textbox autoshape (a no-fill rectangle does not count) and does not "
-            "contain 「缺图」. raw_latex_on_screen warns when on-screen text, including math "
-            "text, contains a LaTeX command or ^{ / _{. Unicode letters such as λ do not. "
-            "office_math_count is the number of m:oMath elements. These warnings do not "
-            "change the process exit code."
+            "algorithm_page_missing_diagram warns when the slide title matches a concept "
+            "(方法, 算法, 架构, 框架, 流程, pipeline, framework) and the page has no "
+            "connector, picture, table, chart, or non-textbox autoshape (a no-fill rectangle "
+            "does not count) and does not contain 「缺图」. Model names such as Mamba or "
+            "Transformer are not keywords. Only the title is matched: a title placeholder, "
+            "otherwise the topmost non-page-number text shape. Page 1 is the cover and is "
+            "exempt. Body text that merely mentions a model does not match. "
+            "raw_latex_on_screen warns when on-screen text, including math text, contains "
+            "a LaTeX command or ^{ / _{. Unicode letters such as λ do not. "
+            "office_math_count is the number of m:oMath elements. "
+            "office_math_missing_fallback warns when an m:oMath element is not inside "
+            "m:oMathPara / a14:m / mc:Choice Requires=a14, or that AlternateContent has no "
+            "mc:Fallback picture (an a:blip). A bare m:oMath inside a:p is this warning. "
+            "These warnings do not change the process exit code."
         ),
         "warnings": [],
     }
@@ -468,10 +558,26 @@ def audit(path):
                     "lower_half_css_px": [round(mid / EMU_PER_PX, 2), round(bottom / EMU_PER_PX, 2)],
                 })
             screen = text_of(tree)
-            record["algorithm_intent"] = bool(ALGORITHM_INTENT.search(screen))
+            title = slide_title_text(tree, sh)
+            record["title_text"] = title
+            record["algorithm_intent"] = bool(ALGORITHM_INTENT.search(title))
             record["has_gap_marker"] = bool(GAP_MARKER.search(screen))
-            if record["algorithm_intent"] and record["diagram_object_count"] == 0 and not record["has_gap_marker"]:
+            has_visual = (
+                record["diagram_object_count"] > 0
+                or record["picture_count"] > 0
+                or record["native_table_count"] > 0
+                or record["native_chart_count"] > 0
+            )
+            if (
+                page != 1
+                and record["algorithm_intent"]
+                and not has_visual
+                and not record["has_gap_marker"]
+            ):
                 record["warnings"].append({"code": "algorithm_page_missing_diagram"})
+            math_warning = office_math_fallback_warning(tree)
+            if math_warning:
+                record["warnings"].append(math_warning)
             raw_hits = RAW_LATEX.findall(screen)
             if raw_hits:
                 record["warnings"].append({
@@ -502,6 +608,10 @@ def audit(path):
         result["slides_with_raw_latex"] = [
             p["page"] for p in pages
             if any(item.get("code") == "raw_latex_on_screen" for item in p["warnings"])
+        ]
+        result["slides_with_invalid_office_math"] = [
+            p["page"] for p in pages
+            if any(item.get("code") == "office_math_missing_fallback" for item in p["warnings"])
         ]
         result["office_math_count"] = sum(p["office_math_count"] for p in pages)
         result["slides_with_office_math"] = [

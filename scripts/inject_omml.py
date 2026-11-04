@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Replace {{MATH:id}} runs with OMML. Does not author a deck by itself.
+"""Replace {{MATH:id}} runs with native PowerPoint OMML plus a picture fallback.
 
-Stdlib only. Pandoc is optional and used only when a formula spec has ``latex``
-and neither ``runs`` nor ``omml``. LaTeX source is never written onto a slide.
+Does not author a deck by itself. Pandoc is optional and used only when a
+formula spec has ``latex`` and neither ``runs`` nor ``omml``. The equation is
+written as ``mc:AlternateContent`` / ``mc:Choice Requires="a14"`` / ``a14:m`` /
+``m:oMathPara`` / ``m:oMath`` on the text shape (MS-ODRAWXML). ``mc:Fallback``
+is the same shape box filled with a high-DPI PNG, so a reader that does not
+draw OMML still shows the equation. LaTeX source is never written onto a slide.
+
+Rendering the fallback PNG needs matplotlib.
 """
 import argparse
+import io
 import json
+import posixpath
 import re
 import shutil
 import subprocess
@@ -30,7 +38,20 @@ RUN_BLOCK = re.compile(r"<a:r\b[^>]*>.*?</a:r>", re.DOTALL)
 TEXT_NODE = re.compile(r"<a:t(?:\s[^>]*)?>(.*?)</a:t>", re.DOTALL)
 ID_RE = re.compile(r"[A-Za-z0-9_-]+")
 MATH_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+A14_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
+MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 NS = {"m": MATH_NS}
+EMU_IN = 914400
+TAG_RE = re.compile(r"<(/?)([A-Za-z0-9]+:[A-Za-z0-9]+)([^>]*)>")
+_GREEK = {
+    "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta",
+    "ε": r"\epsilon", "θ": r"\theta", "λ": r"\lambda", "μ": r"\mu",
+    "ν": r"\nu", "π": r"\pi", "ρ": r"\rho", "σ": r"\sigma",
+    "τ": r"\tau", "φ": r"\phi", "ψ": r"\psi", "ω": r"\omega",
+    "Σ": r"\Sigma", "Π": r"\Pi", "Ω": r"\Omega", "∞": r"\infty",
+    "≤": r"\leq", "≥": r"\geq", "≠": r"\neq", "≈": r"\approx",
+    "×": r"\times", "·": r"\cdot", "−": "-", "–": "-", "—": "-",
+}
 
 
 def assert_no_raw_latex(text, where):
@@ -173,28 +194,293 @@ def load_formulas(path):
     return data
 
 
-def replace_placeholders(xml_text, formulas):
+def _math_fragment(text):
+    parts = []
+    for char in text:
+        if char in _GREEK:
+            parts.append(_GREEK[char] + " ")
+        elif char == " ":
+            parts.append(r"\ ")
+        elif char in "\\{}$%#_&^~":
+            parts.append("\\" + char)
+        else:
+            parts.append(char)
+    return "".join(parts)
+
+
+def _runs_mathtext(runs):
+    pieces = []
+    for item in runs:
+        kind, body = next(iter(item.items()))
+        if kind == "t":
+            pieces.append(_math_fragment(body))
+        elif kind == "frac":
+            pieces.append(r"\frac{" + _math_fragment(body["num"]) + "}{" + _math_fragment(body["den"]) + "}")
+        else:
+            pieces.append(_math_fragment(body["base"]) + ("_{" if kind == "sub" else "^{") + _math_fragment(body[kind]) + "}")
+    return "".join(pieces)
+
+
+def _omml_plain(omml_xml):
+    chunks = re.findall(r"<m:t(?:\s[^>]*)?>(.*?)</m:t>", omml_xml, re.DOTALL)
+    visible = "".join(chunks)
+    return (
+        visible.replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&quot;", '"').replace("&amp;", "&")
+    )
+
+
+def mathtext_for_spec(spec, omml_xml):
+    """Mathtext for the fallback image only. This string is not written into the pptx."""
+    if isinstance(spec, dict) and spec.get("runs"):
+        return "$" + _runs_mathtext(spec["runs"]) + "$"
+    if isinstance(spec, dict) and spec.get("latex") and isinstance(spec["latex"], str):
+        latex = spec["latex"].strip()
+        if latex.startswith("$$") and latex.endswith("$$"):
+            latex = latex[2:-2].strip()
+        elif latex.startswith("$") and latex.endswith("$"):
+            latex = latex[1:-1].strip()
+        return "$" + latex + "$"
+    return _omml_plain(omml_xml) or "?"
+
+
+def _png_figure(draw, width_in, height_in):
+    import matplotlib
+    matplotlib.use("Agg", force=False)
+    import matplotlib.pyplot as plt
+    figure = plt.figure(figsize=(width_in, height_in), dpi=400)
+    figure.patch.set_facecolor("white")
+    axis = figure.add_axes([0, 0, 1, 1])
+    axis.set_axis_off()
+    axis.set_xlim(0, 1)
+    axis.set_ylim(0, 1)
+    try:
+        draw(axis, height_in)
+        buffer = io.BytesIO()
+        figure.savefig(buffer, format="png", dpi=400, facecolor="white")
+    finally:
+        plt.close(figure)
+    return buffer.getvalue()
+
+
+def render_equation_png(expressions, width_in, height_in, plain):
+    """High-DPI PNG. expressions are mathtext; plain is used if mathtext cannot draw them."""
+    width_in = max(1.2, min(12.0, float(width_in)))
+    height_in = max(0.45, min(3.5, float(height_in)))
+    try:
+        import matplotlib
+        matplotlib.use("Agg", force=False)
+        matplotlib.rcParams["mathtext.fontset"] = "dejavusans"
+    except ImportError as exc:
+        raise ValueError(
+            "matplotlib is required to render the OMML fallback image"
+        ) from exc
+
+    def draw_math(axis, height):
+        count = max(1, len(expressions))
+        size = max(16, min(40, height / count * 26))
+        for index, expr in enumerate(expressions):
+            axis.text(
+                0.03, 1 - (index + 0.5) / count, expr,
+                fontsize=size, color="#222222", va="center", ha="left",
+            )
+
+    try:
+        return _png_figure(draw_math, width_in, height_in)
+    except Exception:
+        def draw_plain(axis, height):
+            axis.text(
+                0.03, 0.5, plain or "?",
+                fontsize=max(16, min(36, height * 22)),
+                color="#222222", va="center", ha="left", fontfamily="DejaVu Sans",
+            )
+        return _png_figure(draw_plain, width_in, height_in)
+
+
+def _a14_math(omath_xml):
+    return (
+        '<a14:m xmlns:a14="' + A14_NS + '">'
+        '<m:oMathPara xmlns:m="' + MATH_NS + '">'
+        '<m:oMathParaPr><m:jc m:val="left"/></m:oMathParaPr>'
+        + omath_xml
+        + "</m:oMathPara></a14:m>"
+    )
+
+
+def _shape_spans(xml):
+    spans = []
+    stack = []
+    for match in TAG_RE.finditer(xml):
+        closing, name, rest = match.group(1), match.group(2), match.group(3)
+        if name != "p:sp":
+            continue
+        if closing:
+            if stack:
+                spans.append((stack.pop(), match.end()))
+        elif not rest.rstrip().endswith("/"):
+            stack.append(match.start())
+    return spans
+
+
+def _attrs(fragment, tag):
+    match = re.search(r"<" + tag + r"\b([^>/]*)/?>", fragment)
+    if not match:
+        return {}
+    return dict(re.findall(r'([A-Za-z0-9:]+)="([^"]*)"', match.group(1)))
+
+
+def _xfrm_box(shape):
+    match = re.search(r"<a:xfrm\b[^>]*>.*?</a:xfrm>", shape, re.DOTALL)
+    if not match:
+        return (
+            '<a:xfrm><a:off x="640080" y="1600200"/><a:ext cx="5486400" cy="731520"/></a:xfrm>',
+            6.0,
+            0.8,
+        )
+    xfrm = match.group(0)
+    ext = _attrs(xfrm, "a:ext")
+    try:
+        width = int(ext.get("cx", "5486400")) / EMU_IN
+        height = int(ext.get("cy", "731520")) / EMU_IN
+    except ValueError:
+        width, height = 6.0, 0.8
+    return xfrm, width, height
+
+
+def _fallback_shape(xfrm, rel_id, shape_id):
+    return (
+        '<p:sp><p:nvSpPr><p:cNvPr id="%d" name="Equation fallback"/>'
+        "<p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>%s"
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+        '<a:blipFill><a:blip r:embed="%s"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>'
+        "<a:ln><a:noFill/></a:ln>"
+        "</p:spPr></p:sp>"
+    ) % (shape_id, xfrm, rel_id)
+
+
+def _wrap_alternate(choice_shape, fallback_shape):
+    return (
+        "<mc:AlternateContent>"
+        '<mc:Choice Requires="a14">' + choice_shape + "</mc:Choice>"
+        "<mc:Fallback>" + fallback_shape + "</mc:Fallback>"
+        "</mc:AlternateContent>"
+    )
+
+
+def _ensure_namespaces(xml):
+    match = re.search(r"<p:sld\b([^>]*)>", xml)
+    if not match:
+        raise ValueError("Slide XML has no p:sld root")
+    attrs = match.group(1)
+    prefix = ""
+    if "xmlns:mc=" not in attrs:
+        prefix += ' xmlns:mc="' + MC_NS + '"'
+    if "xmlns:a14=" not in attrs:
+        prefix += ' xmlns:a14="' + A14_NS + '"'
+    if re.search(r"\bmc:Ignorable=", attrs):
+        def add(found):
+            parts = found.group(1).split()
+            if "a14" not in parts:
+                parts.append("a14")
+            return 'mc:Ignorable="' + " ".join(parts) + '"'
+        attrs = re.sub(r'\bmc:Ignorable="([^"]*)"', add, attrs, count=1)
+    else:
+        attrs += ' mc:Ignorable="a14"'
+    return xml[:match.start()] + "<p:sld" + prefix + attrs + ">" + xml[match.end():]
+
+
+def _fresh_rid(rels_text):
+    used = set(re.findall(r'\bId="([^"]+)"', rels_text or ""))
+    number = 1
+    while ("rId%d" % number) in used:
+        number += 1
+    return "rId%d" % number
+
+
+def _add_image_rel(rels_text, rel_id, target):
+    if not rels_text:
+        rels_text = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            "</Relationships>"
+        )
+    if ('Id="%s"' % rel_id) in rels_text:
+        return rels_text
+    relation = (
+        '<Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="%s"/>'
+        % (rel_id, target)
+    )
+    if "</Relationships>" not in rels_text:
+        raise ValueError("Slide relationships part is missing </Relationships>")
+    return rels_text.replace("</Relationships>", relation + "</Relationships>", 1)
+
+
+def _next_shape_id(xml):
+    found = [int(value) for value in re.findall(r'\bid="(\d+)"', xml)]
+    return (max(found) if found else 1) + 1
+
+
+def transform_slide(xml_text, formulas, rels_text, media_stem):
+    """Return slide XML, slide rels XML, and ``{part_name: png_bytes}``."""
     cache = {}
+    xml = xml_text
+    rels = rels_text or ""
+    parts = {}
+    spans = [span for span in _shape_spans(xml) if "{{MATH:" in xml[span[0]:span[1]]]
+    if not spans:
+        raise ValueError("{{MATH: placeholder is not inside a text shape")
+    for start, end in reversed(spans):
+        shape = xml[start:end]
+        used_ids = []
 
-    def repl(match):
-        run = match.group(0)
-        visible = "".join(TEXT_NODE.findall(run))
-        ids = PLACEHOLDER.findall(visible)
-        if not ids:
-            return run
-        if len(ids) != 1 or visible.strip() != "{{MATH:%s}}" % ids[0]:
-            raise ValueError("Placeholder must be the entire run, found: " + visible[:80])
-        formula_id = ids[0]
-        if formula_id not in formulas:
-            raise ValueError("Unknown formula id: " + formula_id)
-        if formula_id not in cache:
-            cache[formula_id] = omml_for_spec(formulas[formula_id])
-        return cache[formula_id]
+        def repl(match, bucket=used_ids):
+            run = match.group(0)
+            visible = "".join(TEXT_NODE.findall(run))
+            found = PLACEHOLDER.findall(visible)
+            if not found:
+                return run
+            if len(found) != 1 or visible.strip() != "{{MATH:%s}}" % found[0]:
+                raise ValueError("Placeholder must be the entire run, found: " + visible[:80])
+            formula_id = found[0]
+            if formula_id not in formulas:
+                raise ValueError("Unknown formula id: " + formula_id)
+            if formula_id not in cache:
+                cache[formula_id] = omml_for_spec(formulas[formula_id])
+            bucket.append(formula_id)
+            return _a14_math(cache[formula_id])
 
-    updated = RUN_BLOCK.sub(repl, xml_text)
-    if PLACEHOLDER.search(updated):
-        raise ValueError("Unresolved {{MATH: placeholder")
-    return updated
+        choice = RUN_BLOCK.sub(repl, shape)
+        if not used_ids or PLACEHOLDER.search(choice):
+            raise ValueError("Unresolved {{MATH: placeholder")
+        expressions = [mathtext_for_spec(formulas[item], cache[item]) for item in used_ids]
+        plain = "  ".join(_omml_plain(cache[item]) for item in used_ids)
+        xfrm, width, height = _xfrm_box(shape)
+        png = render_equation_png(expressions, width, max(height, 0.45 * len(expressions)), plain)
+        rel_id = _fresh_rid(rels)
+        slug = "-".join(used_ids)
+        part = "ppt/media/%s-%s.png" % (media_stem, slug)
+        target = "../media/%s-%s.png" % (media_stem, slug)
+        parts[part] = png
+        rels = _add_image_rel(rels, rel_id, target)
+        fallback = _fallback_shape(xfrm, rel_id, _next_shape_id(xml))
+        xml = xml[:start] + _wrap_alternate(choice, fallback) + xml[end:]
+    xml = _ensure_namespaces(xml)
+    ET.fromstring(xml)
+    if RAW_LATEX.search(xml):
+        raise ValueError("Refusing to write LaTeX source into the slide")
+    return xml, rels, parts
+
+
+def _ensure_png_content_type(xml_text):
+    if 'Extension="png"' in xml_text:
+        return xml_text
+    if "</Types>" not in xml_text:
+        raise ValueError("[Content_Types].xml has no Types element")
+    return xml_text.replace(
+        "</Types>",
+        '<Default Extension="png" ContentType="image/png"/></Types>',
+        1,
+    )
 
 
 def inject_pptx(src, formulas, dest):
@@ -210,26 +496,38 @@ def inject_pptx(src, formulas, dest):
     if not isinstance(formulas, dict):
         raise ValueError("formulas must be a dict")
 
-    prepared = []
     with zipfile.ZipFile(source) as package:
         broken = package.testzip()
         if broken:
             raise ValueError("Corrupt ZIP member: " + broken)
-        for info in package.infolist():
-            data = package.read(info.filename)
-            name = info.filename
-            if name.startswith("ppt/slides/slide") and name.endswith(".xml") and "/_rels/" not in name:
-                text = data.decode("utf-8")
-                if "{{MATH:" in text:
-                    text = replace_placeholders(text, formulas)
-                    if RAW_LATEX.search(text):
-                        raise ValueError("Refusing to write LaTeX source into " + name)
-                    data = text.encode("utf-8")
-            prepared.append((name, data))
+        order = [info.filename for info in package.infolist()]
+        files = {name: package.read(name) for name in order}
+    for name in list(order):
+        if not (name.startswith("ppt/slides/slide") and name.endswith(".xml") and "/_rels/" not in name):
+            continue
+        text = files[name].decode("utf-8")
+        if "{{MATH:" not in text:
+            continue
+        rels_name = posixpath.join(posixpath.dirname(name), "_rels", posixpath.basename(name) + ".rels")
+        rels_text = files[rels_name].decode("utf-8") if rels_name in files else ""
+        stem = Path(name).stem
+        text, rels_text, parts = transform_slide(text, formulas, rels_text, "omml-" + stem)
+        files[name] = text.encode("utf-8")
+        files[rels_name] = rels_text.encode("utf-8")
+        if rels_name not in order:
+            order.append(rels_name)
+        for part, blob in parts.items():
+            files[part] = blob
+            if part not in order:
+                order.append(part)
+        if "[Content_Types].xml" in files:
+            files["[Content_Types].xml"] = _ensure_png_content_type(
+                files["[Content_Types].xml"].decode("utf-8")
+            ).encode("utf-8")
     target.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(target, "w") as package:
-        for name, data in prepared:
-            package.writestr(name, data)
+        for name in order:
+            package.writestr(name, files[name])
     return target
 
 

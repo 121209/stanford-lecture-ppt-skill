@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 import tempfile
@@ -19,6 +20,12 @@ def load(name):
     return module
 audit = load('audit_pptx')
 state = load('run_state')
+
+def _ooxml_schema_dir():
+    folder = ROOT / 'tests' / 'xsd'
+    if (folder / 'pml.xsd').is_file():
+        return folder
+    return None
 
 def write_raw_deck(path, bodies):
     """bodies: list of shape-tree inner XML strings, one per slide."""
@@ -279,7 +286,8 @@ class HelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'algo.pptx'
             write_raw_deck(path, [
-                raw_textbox(2, '训练流程只有文字'),
+                raw_textbox(2, '封面'),
+                raw_textbox(2, '训练流程只有文字') + raw_textbox(4, '下半部有一句说明。', y=4500000),
                 raw_textbox(2, '训练流程') + raw_round(3, '读入'),
                 raw_textbox(2, '架构说明') + RAW_CONNECTOR,
                 raw_textbox(2, '模型结构') + RAW_PICTURE,
@@ -288,14 +296,14 @@ class HelperTests(unittest.TestCase):
                 raw_textbox(2, '推理流程') + raw_textbox(3, '来源：下半部占位。', y=4500000),
             ])
             report = audit.audit(path)
-            self.assertEqual(report['slides_missing_diagram'], [1, 7])
-            self.assertGreater(report['slides'][1]['diagram_object_count'], 0)
-            self.assertGreater(report['slides'][2]['connector_count'], 0)
-            self.assertEqual(report['slides'][3]['picture_count'], 1)
-            self.assertTrue(report['slides'][4]['has_gap_marker'])
-            self.assertFalse(report['slides'][5]['algorithm_intent'])
+            self.assertEqual(report['slides_missing_diagram'], [2, 8])
+            self.assertGreater(report['slides'][2]['diagram_object_count'], 0)
+            self.assertGreater(report['slides'][3]['connector_count'], 0)
+            self.assertEqual(report['slides'][4]['picture_count'], 1)
+            self.assertTrue(report['slides'][5]['has_gap_marker'])
+            self.assertFalse(report['slides'][6]['algorithm_intent'])
             self.assertEqual(
-                [item['code'] for item in report['slides'][0]['warnings']],
+                [item['code'] for item in report['slides'][1]['warnings']],
                 ['algorithm_page_missing_diagram'],
             )
             saved = sys.argv
@@ -333,6 +341,10 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(report['slides'][0]['warnings'], [])
         self.assertEqual(report['office_math_count'], 1)
         self.assertEqual(report['slides_with_office_math'], [3])
+        self.assertIn(
+            'office_math_missing_fallback',
+            [item['code'] for item in report['slides'][2]['warnings']],
+        )
 
     def test_inject_omml_replaces_placeholder_and_rejects_source(self):
         inject = load('inject_omml')
@@ -347,9 +359,17 @@ class HelperTests(unittest.TestCase):
             report = audit.audit(dest)
             self.assertEqual(report['office_math_count'], 1)
             self.assertEqual(report['slides_with_raw_latex'], [])
+            self.assertEqual(report['slides_with_invalid_office_math'], [])
             blob = dest.read_bytes()
             self.assertNotIn(b'{{MATH:', blob)
             self.assertNotIn(b'\\lambda', blob)
+            self.assertIn(b'mc:AlternateContent', blob)
+            self.assertIn(b'Requires="a14"', blob)
+            self.assertIn(b'<a14:m', blob)
+            self.assertIn(b'm:oMathPara', blob)
+            self.assertIn(b'm:oMath', blob)
+            self.assertIn(b'mc:Fallback', blob)
+            self.assertIn(b'a:blip', blob)
             bad = folder/'bad.pptx'
             with self.assertRaises(ValueError):
                 inject.inject_pptx(src, {'rate': {'runs': [{'t': r'\lambda'}]}}, bad)
@@ -410,5 +430,258 @@ class HelperTests(unittest.TestCase):
         self.assertGreater(report['slides'][2]['picture_count'], 0)
         self.assertFalse(report['slides'][2]['algorithm_intent'])
         self.assertFalse(report['slides_without_body_notes'])
+
+    def test_missing_diagram_matches_title_not_model_name(self):
+        """Cover, table, chart, and a summary that only mentions a model must not warn."""
+        ns = audit.NS
+        title = lambda number, text: raw_textbox(number, text, y=400000, sz=3200)
+        bullet = lambda number, text: raw_textbox(number, text, y=1800000)
+        lower = raw_textbox(9, '下半部有一句说明。', y=4500000)
+        table = (
+            '<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="20" name="tbl"/>'
+            '<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>'
+            '<p:xfrm><a:off x="700000" y="1600000"/><a:ext cx="8000000" cy="2200000"/></p:xfrm>'
+            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">'
+            '<a:tbl><a:tblGrid><a:gridCol w="8000000"/></a:tblGrid>'
+            '<a:tr h="400000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/>'
+            '<a:p><a:r><a:rPr sz="2000"/><a:t>Transformer++</a:t></a:r></a:p>'
+            '</a:txBody></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame>'
+        )
+        chart = (
+            '<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="21" name="chart"/>'
+            '<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>'
+            '<p:xfrm><a:off x="700000" y="1600000"/><a:ext cx="8000000" cy="2200000"/></p:xfrm>'
+            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+            f'<c:chart xmlns:c="{ns["c"]}" r:id="rIdC"/></a:graphicData></a:graphic></p:graphicFrame>'
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'titles.pptx'
+            write_raw_deck(path, [
+                title(2, 'Mamba：方法与架构') + lower,
+                title(2, '小结') + bullet(3, '这里回顾 Transformer，也提到架构二字。') + lower,
+                title(2, '方法：Transformer++ 结果') + table + lower,
+                title(2, '方法：整体架构') + chart + lower,
+                title(2, '方法：整体架构') + bullet(3, '只有文字，没有图。') + lower,
+            ])
+            report = audit.audit(path)
+        self.assertEqual(report['slides_missing_diagram'], [5])
+        self.assertIn('Mamba', report['slides'][0]['title_text'])
+        self.assertTrue(report['slides'][0]['algorithm_intent'])
+        self.assertNotIn(
+            'algorithm_page_missing_diagram',
+            [item['code'] for item in report['slides'][0]['warnings']],
+        )
+        self.assertEqual(report['slides'][1]['title_text'], '小结')
+        self.assertFalse(report['slides'][1]['algorithm_intent'])
+        self.assertGreater(report['slides'][2]['native_table_count'], 0)
+        self.assertGreater(report['slides'][3]['native_chart_count'], 0)
+        self.assertEqual(
+            [item['code'] for item in report['slides'][4]['warnings']
+             if item['code'] == 'algorithm_page_missing_diagram'],
+            ['algorithm_page_missing_diagram'],
+        )
+
+    def test_native_omml_opens_and_libreoffice_shows_fallback(self):
+        try:
+            from pptx import Presentation
+            from pptx.util import Emu, Inches, Pt
+        except ImportError:
+            self.skipTest('python-pptx is not installed')
+        inject = load('inject_omml')
+        soffice = shutil.which('soffice') or shutil.which('libreoffice')
+        if not soffice:
+            self.skipTest('LibreOffice is not installed')
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            prs = Presentation()
+            prs.slide_width = Emu(12192000)
+            prs.slide_height = Emu(6858000)
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            box = slide.shapes.add_textbox(Inches(0.8), Inches(2.1), Inches(8.2), Inches(1.05))
+            box.text_frame.paragraphs[0].text = '{{MATH:rate}}'
+            box.text_frame.paragraphs[0].runs[0].font.size = Pt(28)
+            src = folder/'in.pptx'
+            prs.save(str(src))
+            dest = folder/'out.pptx'
+            inject.inject_pptx(src, {
+                'rate': {'runs': [
+                    {'t': 'λ('}, {'t': 't'}, {'t': ')='}, {'t': 'α'},
+                    {'sup': {'base': 'e', 'sup': '−βt'}},
+                ]},
+            }, dest)
+            reloaded = Presentation(str(dest))
+            self.assertEqual(len(reloaded.slides), 1)
+            self._assert_native_omml_package(dest)
+            report = audit.audit(dest)
+            self.assertEqual(report['office_math_count'], 1)
+            self.assertEqual(report['slides_with_invalid_office_math'], [])
+            self.assertEqual(report['slides_with_raw_latex'], [])
+            ratio = self._render_nonwhite_ratio(soffice, dest, folder/'render')
+        self.assertGreater(ratio, 0.001, 'fallback equation image was not visible')
+
+    def _assert_native_omml_package(self, path):
+        ns = {
+            'a': audit.NS['a'],
+            'm': audit.NS['m'],
+            'mc': audit.NS['mc'],
+            'a14': audit.NS['a14'],
+            'p': audit.NS['p'],
+            'r': audit.NS['r'],
+            'rel': audit.NS['rel'],
+            'ct': 'http://schemas.openxmlformats.org/package/2006/content-types',
+        }
+        with zipfile.ZipFile(path) as package:
+            slide = ET.fromstring(package.read('ppt/slides/slide1.xml'))
+            rels = ET.fromstring(package.read('ppt/slides/_rels/slide1.xml.rels'))
+            types = package.read('[Content_Types].xml').decode('utf-8')
+            names = set(package.namelist())
+        self.assertIn('Extension="png"', types)
+        blocks = slide.findall('.//mc:AlternateContent', ns)
+        self.assertTrue(blocks, 'missing mc:AlternateContent')
+        choice = blocks[0].find('mc:Choice', ns)
+        fallback = blocks[0].find('mc:Fallback', ns)
+        self.assertIsNotNone(choice)
+        self.assertIsNotNone(fallback)
+        self.assertIn('a14', (choice.get('Requires') or '').split())
+        math = choice.find('.//a14:m/m:oMathPara/m:oMath', ns)
+        self.assertIsNotNone(math, 'Choice is not a14:m/m:oMathPara/m:oMath')
+        blip = fallback.find('.//a:blip', ns)
+        self.assertIsNotNone(blip, 'Fallback has no picture')
+        embed = blip.get('{%s}embed' % ns['r'])
+        self.assertTrue(embed)
+        target = None
+        for rel in rels:
+            if rel.get('Id') == embed:
+                target = rel.get('Target')
+        self.assertTrue(target)
+        media = 'ppt/media/' + target.split('/')[-1]
+        self.assertIn(media, names)
+        self._assert_fallback_choice_xsd(path)
+
+    def _assert_fallback_choice_xsd(self, path):
+        """Validate Choice and Fallback against the transitional slide schema when present.
+
+        Markup-compatibility preprocessing matches an Office validator: the fallback
+        branch is what a reader without a14 checks, and a14 elements are dropped
+        before the base schema sees the choice branch.
+        """
+        try:
+            from lxml import etree
+        except ImportError:
+            self.skipTest('lxml is not installed')
+        schema_dir = _ooxml_schema_dir()
+        if schema_dir is None:
+            self.fail('OOXML schemas could not be loaded for slide validation')
+        schema = etree.XMLSchema(etree.parse(str(schema_dir / 'pml.xsd')))
+        mc = audit.NS['mc']
+        a14 = audit.NS['a14']
+        with zipfile.ZipFile(path) as package:
+            slide = etree.fromstring(package.read('ppt/slides/slide1.xml'))
+        for keep in ('Fallback', 'Choice'):
+            doc = etree.fromstring(etree.tostring(slide))
+            for node in list(doc.xpath('.//mc:AlternateContent', namespaces={'mc': mc})):
+                picked = node.find('{%s}%s' % (mc, keep))
+                parent = node.getparent()
+                index = list(parent).index(node)
+                parent.remove(node)
+                if picked is not None:
+                    for offset, child in enumerate(list(picked)):
+                        parent.insert(index + offset, child)
+            if '{%s}Ignorable' % mc in doc.attrib:
+                del doc.attrib['{%s}Ignorable' % mc]
+            for node in list(doc.iter()):
+                if not isinstance(node.tag, str):
+                    continue
+                if node.tag.startswith('{%s}' % a14):
+                    node.getparent().remove(node)
+            if not schema.validate(doc):
+                errors = [err.message for err in schema.error_log][:4]
+                self.fail('slide failed XSD after selecting %s: %s' % (keep, '; '.join(errors)))
+
+    def _render_nonwhite_ratio(self, soffice, pptx, dest):
+        from PIL import Image
+        dest.mkdir(parents=True, exist_ok=True)
+        profile = dest / 'profile'
+        cmd = [
+            soffice, '--headless', '--norestore', '--nolockcheck', '--nologo',
+            '-env:UserInstallation=file://%s' % profile,
+            '--convert-to', 'pdf', '--outdir', str(dest), str(pptx),
+        ]
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-400:])
+        pdf = next(dest.glob('*.pdf'))
+        subprocess.run(['pdftoppm', '-png', '-r', '72', str(pdf), str(dest / 'slide')], check=True)
+        image = Image.open(next(dest.glob('slide*.png'))).convert('RGB')
+        pixels = image.load()
+        width, height = image.size
+        dark = 0
+        for y in range(height):
+            for x in range(width):
+                red, green, blue = pixels[x, y]
+                if red < 240 or green < 240 or blue < 240:
+                    dark += 1
+        return dark / float(width * height)
+
+    def test_diamond_label_stays_one_line_and_column_arrows_grow(self):
+        try:
+            import pptx  # noqa: F401
+        except ImportError:
+            self.skipTest('python-pptx is not installed')
+        helpers = load('diagram_helpers')
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            diamond = folder/'diamond.pptx'
+            helpers.build_slide_from_spec({
+                'title': '判断：是否完成',
+                'layout': 'row',
+                'region': [helpers.emu(0.7), helpers.emu(2.0), helpers.emu(2.2), helpers.emu(1.2)],
+                'nodes': [{'id': 'done', 'label': '完成？', 'shape': 'diamond'}],
+                'edges': [],
+                'conclusion': '判断写在菱形里，不换行。',
+                'source': '来源：匿名示意，不是论文实验。',
+                'page': '02',
+            }, diamond)
+            with zipfile.ZipFile(diamond) as package:
+                xml = package.read('ppt/slides/slide1.xml').decode('utf-8')
+            self.assertIn('wrap="none"', xml)
+            self.assertNotIn('<a:br', xml)
+            size = ET.fromstring(xml).find('.//a:rPr', {'a': audit.NS['a']})
+            # The title run is 32pt; the diamond run is the smaller one.
+            sizes = [
+                int(node.get('sz'))
+                for node in ET.fromstring(xml).findall('.//a:rPr', {'a': audit.NS['a']})
+                if node.get('sz')
+            ]
+            self.assertTrue(sizes)
+            self.assertLessEqual(min(sizes), 2000)
+            columns = folder/'columns.pptx'
+            helpers.build_slide_from_spec({
+                'title': '架构：编码端与解码端',
+                'layout': 'columns',
+                'nodes': helpers.ARCH_NODES,
+                'edges': helpers.ARCH_EDGES,
+                'conclusion': '模块为示意，不代表论文原图。',
+                'source': '来源：匿名结构，不是论文 Figure。',
+                'page': '02',
+            }, columns)
+            root = ET.fromstring(zipfile.ZipFile(columns).read('ppt/slides/slide1.xml'))
+            ns = {'a': audit.NS['a'], 'p': audit.NS['p']}
+            vertical = []
+            for connector in root.findall('.//p:cxnSp', ns):
+                ext = connector.find('.//a:ext', ns)
+                if ext is None:
+                    continue
+                cx, cy = int(ext.get('cx', '0')), int(ext.get('cy', '0'))
+                if cy > cx:
+                    vertical.append(cy)
+                    tail = connector.find('.//a:tailEnd', ns)
+                    self.assertIsNotNone(tail)
+                    self.assertEqual(tail.get('len'), 'lg')
+            self.assertGreaterEqual(len(vertical), 2)
+            self.assertGreaterEqual(min(vertical), helpers.emu(0.36))
+            report = audit.audit(columns)
+        self.assertEqual(report['slides_over_word_cap'], [])
+        self.assertEqual(report['slides_with_empty_lower_content_band'], [])
+        self.assertEqual(report['slides_missing_diagram'], [])
 
 if __name__ == '__main__':unittest.main()

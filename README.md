@@ -72,7 +72,7 @@ git clone https://github.com/121209/stanford-lecture-ppt-skill.git ~/.codex/skil
 
 ## 检查工具
 
-`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`inject_omml.py` 用标准库注入 OMML，pandoc 可选。
+`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`inject_omml.py` 注入带图片回退的原生 OMML，pandoc 可选，回退图需要 matplotlib。
 
 ```bash
 python scripts/audit_pptx.py assets/demo.pptx
@@ -81,7 +81,7 @@ python scripts/run_state.py --help
 python -m unittest discover -s tests -v
 ```
 
-`audit_pptx.py` 按实际页序检查对象、备注、外部关系、越界、大图线索、屏幕字数、内容带下半部、算法页是否有形状，以及屏幕上有没有 LaTeX 源码。后几项是警告，不改变退出码。`run_state.py` 记录确认门、逐页派发、素材／预览 hash 和检查状态。完整用法见 [制作流程](references/workflow.md)、[示意图](references/diagrams.md) 和 [公式](references/formulas.md)。
+`audit_pptx.py` 按实际页序检查对象、备注、外部关系、越界、大图线索、屏幕字数、内容带下半部、标题是否点明了缺图的方法或架构页，OMML 有没有图片回退，以及屏幕上有没有 LaTeX 源码。后几项是警告，不改变退出码。`run_state.py` 记录确认门、逐页派发、素材／预览 hash 和检查状态。完整用法见 [制作流程](references/workflow.md)、[示意图](references/diagrams.md) 和 [公式](references/formulas.md)。
 
 ## 文件结构
 
