@@ -323,6 +323,24 @@ def _arrow_ends(src, dst):
     return acx, ay, bcx, by + bh
 
 
+def add_bar_chart(slide, categories, values, region, highlight=None, source=None):
+    """Native bar chart. Implemented in chart_helpers.py so axis ids stay schema-legal."""
+    return _chart_helpers().add_bar_chart(
+        slide, categories, values, region, highlight=highlight, source=source
+    )
+
+
+def _chart_helpers():
+    if getattr(_chart_helpers, "module", None) is None:
+        import importlib.util
+        path = Path(__file__).resolve().parent / "chart_helpers.py"
+        spec = importlib.util.spec_from_file_location("chart_helpers", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _chart_helpers.module = module
+    return _chart_helpers.module
+
+
 def add_diagram(slide, nodes, edges, region, layout="row"):
     """Draw nodes and straight arrows. region is (x, y, w, h) in EMU."""
     api = _pptx()

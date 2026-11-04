@@ -454,11 +454,12 @@ def audit(path):
             "does not judge font size. "
             "algorithm_page_missing_diagram warns when the slide title matches a concept "
             "(方法, 算法, 架构, 框架, 流程, pipeline, framework) and the page has no "
-            "connector, picture, table, chart, or non-textbox autoshape (a no-fill rectangle "
-            "does not count) and does not contain 「缺图」. Model names such as Mamba or "
-            "Transformer are not keywords. Only the title is matched: a title placeholder, "
-            "otherwise the topmost non-page-number text shape. Page 1 is the cover and is "
-            "exempt. Body text that merely mentions a model does not match. "
+            "connector, picture, table, chart, valid OMML, or non-textbox autoshape "
+            "(a no-fill rectangle does not count) and does not contain 「缺图」. "
+            "Valid OMML means office_math_count > 0 and no office_math_missing_fallback. "
+            "Model names such as Mamba or Transformer are not keywords. Only the title is "
+            "matched: a title placeholder, otherwise the topmost non-page-number text shape. "
+            "Page 1 is the cover and is exempt. Body text that merely mentions a model does not match. "
             "raw_latex_on_screen warns when on-screen text, including math text, contains "
             "a LaTeX command or ^{ / _{. Unicode letters such as λ do not. "
             "office_math_count is the number of m:oMath elements. "
@@ -562,11 +563,14 @@ def audit(path):
             record["title_text"] = title
             record["algorithm_intent"] = bool(ALGORITHM_INTENT.search(title))
             record["has_gap_marker"] = bool(GAP_MARKER.search(screen))
+            math_warning = office_math_fallback_warning(tree)
+            has_valid_office_math = record["office_math_count"] > 0 and math_warning is None
             has_visual = (
                 record["diagram_object_count"] > 0
                 or record["picture_count"] > 0
                 or record["native_table_count"] > 0
                 or record["native_chart_count"] > 0
+                or has_valid_office_math
             )
             if (
                 page != 1
@@ -575,7 +579,6 @@ def audit(path):
                 and not record["has_gap_marker"]
             ):
                 record["warnings"].append({"code": "algorithm_page_missing_diagram"})
-            math_warning = office_math_fallback_warning(tree)
             if math_warning:
                 record["warnings"].append(math_warning)
             raw_hits = RAW_LATEX.findall(screen)

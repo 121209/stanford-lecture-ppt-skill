@@ -72,7 +72,7 @@ git clone https://github.com/121209/stanford-lecture-ppt-skill.git ~/.codex/skil
 
 ## 检查工具
 
-`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`inject_omml.py` 注入带图片回退的原生 OMML，pandoc 可选，回退图需要 matplotlib。
+`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`chart_helpers.py` 写原生条形图。`inject_omml.py` 注入带图片回退的原生 OMML：LaTeX 由内置编译器转换，pandoc 只是备用，回退图需要 matplotlib。
 
 ```bash
 python scripts/audit_pptx.py assets/demo.pptx

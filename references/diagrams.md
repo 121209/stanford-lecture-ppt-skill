@@ -27,7 +27,7 @@
 
 大纲里这一页的 `visual_plan.kind` 写 `native_diagram`，`must_diagram` 为 true。材料里没有可画的结构时，`kind` 写 `gap`，版心写清缺的是哪一张、为什么暂缺。两种都算合规。只有文字、没有形状、没有连接线、没有原图、也没有「缺图」，不合规。
 
-结构审计只看这一页的标题，不扫正文。标题里要有概念词（方法、算法、架构、框架、流程，或 method、algorithm、architecture、pipeline、framework）才会记 `algorithm_page_missing_diagram`。Mamba、Transformer 这类模型名本身不触发。第 1 页封面，以及已经有表格、图表、图片或原生示意图的页，不警告。所以封面标题里出现模型名、结果表里出现 Transformer++、小结正文里提到 Transformer，都不应为了消警告而改词。
+结构审计只看这一页的标题，不扫正文。标题里要有概念词（方法、算法、架构、框架、流程，或 method、algorithm、architecture、pipeline、framework）才会记 `algorithm_page_missing_diagram`。Mamba、Transformer 这类模型名本身不触发。第 1 页封面，以及已经有表格、图表、图片、带图片回退的公式或原生示意图的页，不警告。所以封面标题里出现模型名、结果表里出现 Transformer++、小结正文里提到 Transformer，标题是「方法」但页上已有合格 OMML，都不应为了消警告而改词。
 
 `text_ok` 只给封面、过渡和纯讨论收获。方法段和结果段不要标 `text_ok`。整稿没有视觉的页，目标不超过 30%；论文精读的方法段和结果段几乎每页都要有图、表、公式或原生示意图。
 
@@ -114,6 +114,8 @@ python scripts/diagram_helpers.py --samples assets/diagram-samples/figure-first.
 `--samples` 会写出三页匿名样张：四步流程、双栏架构、公式加符号说明。样张只示范版式，数字和步骤都不是论文结果。`assets/demo.pptx` 可以另有一页图优先示例，不替换前面各页的内容。
 
 颜色锁死：填充白，普通描边和箭头 `#222222`，强调节点描边 `#C00000`，正文 `#222222`，标题 `#C00000`。去掉主题样式，避免被主题蓝盖掉。
+
+论文里已经给出的柱状对比，用 `add_bar_chart`（`scripts/chart_helpers.py`，`diagram_helpers.add_bar_chart` 转过去）。它写原生 `c:chart`：没有图例和图表标题，数据标签打开，数值轴从 0 起并且隐藏。要强调的那一根是 `#C00000`，其余是 `#BFBFBF`。python-pptx 有时写出负数 `c:axId`，函数会改成正数，否则 Office 架构校验失败。柱上的数由调用方传入，并且应当是论文里的数。示意流程仍用形状。
 
 ## 硬禁止
 
