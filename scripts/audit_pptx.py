@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Read-only OOXML inventory. This is not a visual or scientific QA verdict.
 
-Also estimates per-slide on-screen word counts against a 40-word cap (cover exempt).
+Also estimates per-slide on-screen word counts against a 40-word cap (cover exempt),
+and warns when the lower half of the content band is largely empty. That warning
+does not change the process exit code.
 """
 import argparse
 import hashlib
@@ -28,6 +30,13 @@ WORD_CAP = 40
 SOURCE_LINE_MAX_HUNDREDTHS_PT = 1500
 # Bottom band of the slide: ≤15pt paragraphs here are treated as source lines.
 FOOTER_SOURCE_MIN_Y_RATIO = 0.85
+# Content band: body below the title (~y145/720) down to the footer source band.
+CONTENT_BAND_TOP_RATIO = 0.20
+# A shape counts in a half only when it is at least this large and overlaps that half
+# by this much. ~28px is one text line; a hairline or a few pixels past the midline
+# does not fill the lower half.
+CONTENT_BAND_MIN_EXTENT_PX = 28
+CONTENT_BAND_MIN_EXTENT_EMU = int(round(CONTENT_BAND_MIN_EXTENT_PX * EMU_PER_PX))
 CJK_CHAR = re.compile(r"[\u3400-\u9fff]")
 LATIN_WORD = re.compile(r"[A-Za-z0-9]+(?:[-'’./][A-Za-z0-9]+)*")
 PAGE_NUMBER_TEXT = re.compile(r"\d{1,3}")
@@ -170,6 +179,100 @@ def geometry(node):
             int(ext.get("cx", 0)), int(ext.get("cy", 0))]
 
 
+def group_geometry(group):
+    xfrm = group.find("p:grpSpPr/a:xfrm", NS)
+    if xfrm is None:
+        return None
+    off, ext = xfrm.find("a:off", NS), xfrm.find("a:ext", NS)
+    if off is None or ext is None:
+        return None
+    return [int(off.get("x", 0)), int(off.get("y", 0)),
+            int(ext.get("cx", 0)), int(ext.get("cy", 0))]
+
+
+def _is_slide_number(shape):
+    ph = shape.find("p:nvSpPr/p:nvPr/p:ph", NS)
+    return ph is not None and ph.get("type") == "sldNum"
+
+
+def _occupies_content_band(shape):
+    """Pictures, tables, charts, connectors, and groups count by geometry.
+
+    A text box counts only when it has non-whitespace text, so an empty
+    placeholder does not hide a blank lower half.
+    """
+    if shape.tag == tag("p", "sp"):
+        return bool(text_of(shape).strip())
+    return shape.tag in (tag("p", "pic"), tag("p", "graphicFrame"), tag("p", "cxnSp"), tag("p", "grpSp"))
+
+
+def content_band_boxes(container):
+    """Slide-coordinate boxes that can occupy the content band.
+
+    Group children are not measured: their offsets are often local to the group.
+    A group counts only through its own transform.
+    """
+    boxes = []
+    for item in container:
+        if item.tag == tag("mc", "AlternateContent"):
+            choice = item.find("mc:Choice", NS)
+            if choice is None:
+                choice = item.find("mc:Fallback", NS)
+            if choice is not None:
+                boxes.extend(content_band_boxes(choice))
+            continue
+        if not _occupies_content_band(item):
+            continue
+        if item.tag == tag("p", "grpSp"):
+            box = group_geometry(item)
+        else:
+            if _is_slide_number(item):
+                continue
+            box = geometry(item)
+        if box is not None and box[2] > 0 and box[3] > 0:
+            boxes.append(box)
+    return boxes
+
+
+def content_band_bounds(slide_h):
+    top = int(slide_h * CONTENT_BAND_TOP_RATIO)
+    bottom = int(slide_h * FOOTER_SOURCE_MIN_Y_RATIO)
+    mid = (top + bottom) // 2
+    return top, mid, bottom
+
+
+def _overlap(start, length, y0, y1):
+    return max(0, min(start + length, y1) - max(start, y0))
+
+
+def _occupies_half(box, y0, y1, min_extent):
+    if box[2] < min_extent or box[3] < min_extent:
+        return False
+    return _overlap(box[1], box[3], y0, y1) >= min_extent
+
+
+def lower_content_band_is_empty(boxes, slide_h, min_extent=CONTENT_BAND_MIN_EXTENT_EMU):
+    """True when the upper content band holds a shape and the lower half does not.
+
+    Cover pages are not special-cased here; the caller exempts page 1.
+    """
+    top, mid, bottom = content_band_bounds(slide_h)
+    if mid - top < min_extent or bottom - mid < min_extent:
+        return False
+    upper = False
+    lower = False
+    for box in boxes:
+        if box is None:
+            continue
+        if _occupies_half(box, top, mid, min_extent):
+            upper = True
+        if _occupies_half(box, mid, bottom, min_extent):
+            lower = True
+        if upper and lower:
+            return False
+    return upper and not lower
+
+
 def notes_body(zf, slide_part):
     rels = relationships(zf, slide_part)
     rel = next((r for r in rels.values() if r.get("Type", "").endswith("/notesSlide")), None)
@@ -206,7 +309,17 @@ def audit(path):
             "(a source marker, or a ≤15pt paragraph in the bottom 15% of the slide). "
             "Other ≤15pt body text still counts, so shrinking the font does not hide overflow. "
             "Page 1 is exempt as the cover. Runs without an explicit size are counted. "
-            "This is not a line-break, bullet-limit, or visual-density verdict."
+            "This is not a line-break, bullet-limit, or visual-density verdict. "
+            "empty_lower_content_band is a warning only and does not change the process exit code. "
+            "The content band runs from 20% to 85% of slide height (body below the title, above the "
+            "source/page-number band) and is split at its midline. The warning fires when the upper "
+            "half contains a shape at least about 28px wide that extends at least about 28px into "
+            "that half, and the lower half has no such shape. Page 1 is exempt. A one-line text shape "
+            "in the lower half clears it. Empty text boxes do not. Pictures, tables, charts, "
+            "connectors, and group boxes count by geometry. Group children are not measured; the "
+            "group box is. Missing group transforms are not inferred. The check does not decide "
+            "whether the fill is a conclusion, a figure note, a schematic, or a 缺图 page, and it "
+            "does not judge font size."
         ),
         "warnings": [],
     }
@@ -285,6 +398,14 @@ def audit(path):
                     "word_count": shown,
                     "cap": WORD_CAP,
                 })
+            band_boxes = content_band_boxes(tree)
+            if page != 1 and lower_content_band_is_empty(band_boxes, sh):
+                top, mid, bottom = content_band_bounds(sh)
+                record["warnings"].append({
+                    "code": "empty_lower_content_band",
+                    "content_band_css_px": [round(top / EMU_PER_PX, 2), round(bottom / EMU_PER_PX, 2)],
+                    "lower_half_css_px": [round(mid / EMU_PER_PX, 2), round(bottom / EMU_PER_PX, 2)],
+                })
             notes_part, notes = notes_body(zf, part)
             count = sum(not c.isspace() for c in notes)
             record.update({"notes_part": notes_part, "has_nonempty_body_notes": bool(count),
@@ -297,6 +418,10 @@ def audit(path):
         result["slides_over_word_cap"] = [
             p["page"] for p in pages
             if any(item.get("code") == "onscreen_text_over_word_cap" for item in p["warnings"])
+        ]
+        result["slides_with_empty_lower_content_band"] = [
+            p["page"] for p in pages
+            if any(item.get("code") == "empty_lower_content_band" for item in p["warnings"])
         ]
     return result
 
