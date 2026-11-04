@@ -24,7 +24,7 @@
 
 | 来源 | 取用的规则 |
 | --- | --- |
-| [Noi1r/powerpoint-skill](https://github.com/Noi1r/powerpoint-skill/blob/main/powerpoint-slides/SKILL.md) | 视觉优先（约十秒内不能只靠文字看懂就要有图；无视觉页目标不超过 30%）；结构用分层图、行为用 Mermaid、数学几何才考虑 TikZ；OMML 优先，禁止用 Unicode 堆假公式；LibreOffice 里 OMML 空白是预期 |
+| [Noi1r/powerpoint-skill](https://github.com/Noi1r/powerpoint-skill/blob/main/powerpoint-slides/SKILL.md) | 视觉优先（约十秒内不能只靠文字看懂就要有图；无视觉页目标不超过 30%）；结构用分层图、行为用 Mermaid、数学几何才考虑 TikZ；OMML 优先，禁止用 Unicode 堆假公式。该来源把 LibreOffice 里 OMML 空白当作预期；本仓库的注入脚本改为原生 OMML 加高 DPI 回退图，空白不再通过 |
 | [PlutoLei/paperbanana-skill](https://github.com/PlutoLei/paperbanana-skill) | `editable` 失败即停，禁止静默退回整页 image 还声称可编辑 |
 | [mermaid2pptx](https://github.com/serendipitynz/mermaid2pptx) 与 [pptx-diagram](https://github.com/thititongumpun/skills) | flowchart / sequence 可以落成可编辑的形状和连接线。组会默认用 python-pptx 手摆同一类节点表 |
 | [nature-figure](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-figure) | AI 生图仅在用户明示时使用；产出是概念草稿，不是数据图；架构优先手绘矢量 |
