@@ -76,6 +76,10 @@ git -C ~/.codex/skills/stanford-lecture-ppt pull --ff-only
 
 Codex 会检测**本地技能文件**的变化；更新未显示时重启 Codex。这是本地检测，不是从 GitHub 自动拉取。参见 [OpenAI 官方技能文档](https://learn.chatgpt.com/docs/build-skills)。
 
+## 纯风格迁移与局部修改
+
+“内容不变，只换风格”保留正文、公式含义、图表数据、页序和备注，只调整视觉属性。单页补充不附封面；公式美化保留语义、可编辑性与兼容显示；整图点击进入使用同一次单击触发的对象动画。详见 [局部编辑与动画](references/scoped-edits.md)。
+
 ## 流程
 
 材料阅读和事实核对 → 逐页大纲与素材映射 → 固定风格及制作路径 → 代表性内容样张 → 逐页任务与结果记录 → 全页质检、修复和备注 → 最终PPTX。
