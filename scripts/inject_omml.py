@@ -9,7 +9,9 @@ compiler raises and pandoc is installed. Otherwise the command fails.
 
 The equation is written as ``mc:AlternateContent`` / ``mc:Choice Requires="a14"``
 / ``a14:m`` / ``m:oMathPara`` / ``m:oMath`` (MS-ODRAWXML). ``mc:Fallback`` is a
-high-DPI PNG of the same formula, fitted to the box without stretching.
+high-DPI transparent PNG of the same formula, fitted to the box without stretching.
+The picture's mathtext string rewrites ``\\frac`` to ``\\dfrac`` so fractions are
+display style. The string sent to the OMML compiler is not rewritten.
 LaTeX source is never written onto a slide.
 
 Rendering the fallback PNG needs matplotlib.
@@ -37,6 +39,11 @@ from xml.sax.saxutils import escape
 _MATHTEXT_DROP = re.compile(
     r"\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle|limits|nolimits)\b"
 )
+# ``\frac`` is text style in mathtext and draws small beside 18–20pt type.
+# ``\dfrac`` / ``\tfrac`` do not contain the command ``\frac``.
+_FRAC_CMD = re.compile(r"\\frac\b")
+# Display fractions and roots need a larger nominal size than a single letter.
+_TALL_MATH = re.compile(r"\\(?:dfrac|sqrt)\b")
 RAW_LATEX = re.compile(
     r"\\(?:frac|dfrac|tfrac|sum|prod|int|iint|iiint|lambda|alpha|beta|gamma|theta|sigma|"
     r"mu|nu|omega|phi|psi|delta|epsilon|left|right|cdot|times|sqrt|mathbb|mathrm|mathbf|"
@@ -289,7 +296,7 @@ def _runs_mathtext(runs):
         if kind == "t":
             pieces.append(_math_fragment(body))
         elif kind == "frac":
-            pieces.append(r"\frac{" + _math_fragment(body["num"]) + "}{" + _math_fragment(body["den"]) + "}")
+            pieces.append(r"\dfrac{" + _math_fragment(body["num"]) + "}{" + _math_fragment(body["den"]) + "}")
         else:
             pieces.append(_math_fragment(body["base"]) + ("_{" if kind == "sub" else "^{") + _math_fragment(body[kind]) + "}")
     return "".join(pieces)
@@ -313,10 +320,20 @@ def _unwrap_math_dollars(latex):
     return text
 
 
+def _display_fractions(text):
+    """Rewrite ``\\frac`` to ``\\dfrac`` for the fallback picture only."""
+    return _FRAC_CMD.sub(lambda _match: r"\dfrac", text)
+
+
 def _mathtext_latex(latex):
-    """Same LaTeX string mathtext will draw. Style commands it rejects are removed."""
+    """Same LaTeX string mathtext will draw. Style commands it rejects are removed.
+
+    ``\\frac`` becomes ``\\dfrac`` here. ``omml_from_latex`` still compiles the
+    original string, so the OMML fraction stays ``m:f``.
+    """
     text = _MATHTEXT_DROP.sub("", _unwrap_math_dollars(latex))
     text = text.replace(r"\operatorname*{", r"\operatorname{")
+    text = _display_fractions(text)
     return text.strip()
 
 
@@ -340,16 +357,20 @@ def _png_figure(draw, width_in, height_in):
     matplotlib.use("Agg", force=False)
     import matplotlib.pyplot as plt
     figure = plt.figure(figsize=(width_in, height_in), dpi=400)
-    figure.patch.set_facecolor("white")
+    figure.patch.set_alpha(0)
+    figure.patch.set_facecolor("none")
     axis = figure.add_axes([0, 0, 1, 1])
     axis.set_axis_off()
+    axis.patch.set_alpha(0)
+    axis.set_facecolor("none")
     axis.set_xlim(0, 1)
     axis.set_ylim(0, 1)
     try:
         draw(axis, height_in)
         buffer = io.BytesIO()
         figure.savefig(
-            buffer, format="png", dpi=400, facecolor="white",
+            buffer, format="png", dpi=400,
+            transparent=True, facecolor="none",
             bbox_inches="tight", pad_inches=0.06,
         )
     finally:
@@ -357,7 +378,20 @@ def _png_figure(draw, width_in, height_in):
     return buffer.getvalue()
 
 
-def render_equation_png(expressions, width_in, height_in, plain, strict=False):
+def _fallback_fontsize(height_in, count, expression, inline=False):
+    """Point size for the fallback drawing, before the PNG is fitted to the box.
+
+    The floor sits with 18–20pt Chinese beside the formula. Display fractions
+    and roots are a bit larger so the numerator is not a size below the body.
+    """
+    per_line = 32 if inline else 30
+    size = float(height_in) / max(1, count) * per_line
+    if _TALL_MATH.search(expression or ""):
+        size *= 1.2
+    return max(22, min(48, size))
+
+
+def render_equation_png(expressions, width_in, height_in, plain, strict=False, inline=False):
     """High-DPI PNG of the formula. ``strict`` refuses a plain-text stand-in.
 
     The font is stixsans so the fallback sits next to the sans body. When
@@ -377,8 +411,8 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False):
 
     def draw_math(axis, height):
         count = max(1, len(expressions))
-        size = max(16, min(40, height / count * 26))
         for index, expr in enumerate(expressions):
+            size = _fallback_fontsize(height, count, expr, inline=inline)
             axis.text(
                 0.03, 1 - (index + 0.5) / count, expr,
                 fontsize=size, color="#222222", va="center", ha="left",
@@ -406,7 +440,7 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False):
         def draw_plain(axis, height):
             axis.text(
                 0.03, 0.5, plain or "?",
-                fontsize=max(16, min(36, height * 22)),
+                fontsize=max(20, min(40, height * 24)),
                 color="#222222", va="center", ha="left", fontfamily="DejaVu Sans",
             )
         return _png_figure(draw_plain, width_in, height_in)
@@ -631,8 +665,13 @@ def transform_slide(xml_text, formulas, rels_text, media_stem):
             and formulas[item]["latex"].strip()
             for item in used_ids
         )
+        inline = any(
+            isinstance(formulas.get(item), dict) and formulas[item].get("inline")
+            for item in used_ids
+        )
         png = render_equation_png(
-            expressions, width, max(height, 0.45 * len(expressions)), plain, strict=strict
+            expressions, width, max(height, 0.45 * len(expressions)), plain,
+            strict=strict, inline=inline,
         )
         png_w, png_h = _png_size(png)
         xfrm = _fit_xfrm(xfrm, png_w, png_h)

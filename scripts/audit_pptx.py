@@ -5,8 +5,10 @@ Also estimates per-slide on-screen word counts against a 40-word cap (cover exem
 and warns when the lower half of the content band is largely empty. A content slide
 whose title names an algorithm, method, architecture, or pipeline, and that has no
 diagram, picture, table, chart, or 「缺图」 marker, is a warning. So is raw LaTeX,
-and OMML that is not PowerPoint's a14 choice plus a picture fallback. None of these
-warnings change the process exit code.
+and OMML that is not PowerPoint's a14 choice plus a picture fallback. Visible body
+text below 18pt outside the footer/source band, and text that is faint on white
+(including #BFBFBF), are warnings too. None of these warnings change the process
+exit code.
 """
 import argparse
 import hashlib
@@ -32,6 +34,11 @@ EMU_PER_PX = 9525
 WORD_CAP = 40
 # Explicit run size is in hundredths of a point. 15pt source lines are excluded.
 SOURCE_LINE_MAX_HUNDREDTHS_PT = 1500
+# Body hard floor. Caption-sized 16pt text is still below this and may warn.
+BODY_MIN_HUNDREDTHS_PT = 1800
+# WCAG contrast of explicit text color against the white slide.
+CONTRAST_MIN_ON_WHITE = 4.5
+FORBIDDEN_TEXT_COLOR = "BFBFBF"
 # Bottom band of the slide: ≤15pt paragraphs here are treated as source lines.
 FOOTER_SOURCE_MIN_Y_RATIO = 0.85
 # Content band: body below the title (~y145/720) down to the footer source band.
@@ -174,6 +181,131 @@ def paragraph_words(paragraph, in_footer):
     if small and (in_footer or SOURCE_MARK.search(visible)):
         return 0.0
     return word_count(visible)
+
+
+def _srgb(element):
+    if element is None:
+        return None
+    color = element.find("a:solidFill/a:srgbClr", NS)
+    if color is None:
+        return None
+    value = (color.get("val") or "").strip().upper()
+    if len(value) == 6 and all(char in "0123456789ABCDEF" for char in value):
+        return value
+    return None
+
+
+def _channel_luminance(channel):
+    unit = channel / 255.0
+    if unit <= 0.04045:
+        return unit / 12.92
+    return ((unit + 0.055) / 1.055) ** 2.4
+
+
+def contrast_on_white(hex_color):
+    """WCAG contrast ratio of an sRGB hex color against pure white."""
+    red = int(hex_color[0:2], 16)
+    green = int(hex_color[2:4], 16)
+    blue = int(hex_color[4:6], 16)
+    luminance = (
+        0.2126 * _channel_luminance(red)
+        + 0.7152 * _channel_luminance(green)
+        + 0.0722 * _channel_luminance(blue)
+    )
+    return 1.05 / (luminance + 0.05)
+
+
+def _format_pt(value):
+    rounded = round(value, 2)
+    if rounded == int(rounded):
+        return int(rounded)
+    return rounded
+
+
+def _paragraph_run_style(paragraph):
+    """Visible drawing runs as (text, size hundredths or None, sRGB or None)."""
+    default_sz = None
+    default_color = None
+    p_pr = paragraph.find("a:pPr", NS)
+    if p_pr is not None:
+        def_rpr = p_pr.find("a:defRPr", NS)
+        if def_rpr is not None:
+            if def_rpr.get("sz"):
+                try:
+                    default_sz = int(def_rpr.get("sz"))
+                except ValueError:
+                    default_sz = None
+            default_color = _srgb(def_rpr)
+    runs = []
+    for child in list(paragraph):
+        if child.tag not in (tag("a", "r"), tag("a", "fld")):
+            continue
+        text = "".join(node.text or "" for node in child.iter(tag("a", "t")))
+        if not text:
+            continue
+        color = _srgb(child.find("a:rPr", NS)) or default_color
+        runs.append((text, _run_size(child, default_sz), color))
+    return runs
+
+
+def _in_footer_band(box, slide_h, nested):
+    return (
+        (not nested)
+        and box is not None
+        and slide_h > 0
+        and box[1] >= slide_h * FOOTER_SOURCE_MIN_Y_RATIO
+    )
+
+
+def typography_findings(shape, box, slide_h, nested):
+    """Point sizes below 18pt, and faint explicit text colors, for one shape.
+
+    Returns ``(sizes_pt, colors)``. Footer/source-band shapes, slide numbers,
+    digit-only page numbers, and ≤15pt source lines are not body text.
+    """
+    ph = shape.find("p:nvSpPr/p:nvPr/p:ph", NS)
+    if ph is not None and ph.get("type") == "sldNum":
+        return [], []
+    in_footer = _in_footer_band(box, slide_h, nested)
+    small = []
+    pale = []
+    seen = set()
+    for tx_name in (tag("p", "txBody"), tag("a", "txBody")):
+        for body in shape.iter(tx_name):
+            for paragraph in body.findall("a:p", NS):
+                if id(paragraph) in seen:
+                    continue
+                seen.add(id(paragraph))
+                runs = _paragraph_run_style(paragraph)
+                if not runs:
+                    continue
+                visible = "".join(text for text, _, _ in runs).strip()
+                if not visible:
+                    continue
+                sizes = [sz for _, sz, _ in runs]
+                source_line = all(
+                    sz is not None and sz <= SOURCE_LINE_MAX_HUNDREDTHS_PT for sz in sizes
+                ) and bool(SOURCE_MARK.search(visible))
+                page_number = bool(PAGE_NUMBER_TEXT.fullmatch(visible)) and (
+                    in_footer
+                    or all(sz is None or sz <= SOURCE_LINE_MAX_HUNDREDTHS_PT for sz in sizes)
+                )
+                skip_body_floor = in_footer or source_line or page_number
+                for text, sz, color in runs:
+                    if not text.strip():
+                        continue
+                    if (
+                        not skip_body_floor
+                        and sz is not None
+                        and sz < BODY_MIN_HUNDREDTHS_PT
+                    ):
+                        small.append(sz / 100.0)
+                    if color and (
+                        color == FORBIDDEN_TEXT_COLOR
+                        or contrast_on_white(color) < CONTRAST_MIN_ON_WHITE
+                    ):
+                        pale.append(color)
+    return small, pale
 
 
 def onscreen_words(shape, box, slide_h, nested):
@@ -450,8 +582,8 @@ def audit(path):
             "in the lower half clears it. Empty text boxes do not. Pictures, tables, charts, "
             "connectors, and group boxes count by geometry. Group children are not measured; the "
             "group box is. Missing group transforms are not inferred. The check does not decide "
-            "whether the fill is a conclusion, a figure note, a schematic, or a 缺图 page, and it "
-            "does not judge font size. "
+            "whether the fill is a conclusion, a figure note, a schematic, or a 缺图 page. "
+            "That band check does not judge font size. "
             "algorithm_page_missing_diagram warns when the slide title matches a concept "
             "(方法, 算法, 架构, 框架, 流程, pipeline, framework) and the page has no "
             "connector, picture, table, chart, valid OMML, or non-textbox autoshape "
@@ -466,7 +598,16 @@ def audit(path):
             "office_math_missing_fallback warns when an m:oMath element is not inside "
             "m:oMathPara / a14:m / mc:Choice Requires=a14, or that AlternateContent has no "
             "mc:Fallback picture (an a:blip). A bare m:oMath inside a:p is this warning. "
-            "These warnings do not change the process exit code."
+            "These warnings do not change the process exit code. "
+            "font_below_min warns when a visible body run has an explicit size below 18pt "
+            "and the shape sits outside the footer/source band (the bottom 15% of the slide). "
+            "Slide-number placeholders, digit-only page numbers, and ≤15pt lines with a source "
+            "marker are not body. Runs with no explicit size are not judged. A 16pt caption is "
+            "below this body floor and may warn. "
+            "low_contrast_text warns when an explicit sRGB text color contrasts below 4.5:1 "
+            "with white, and whenever that text color is #BFBFBF. Shape fills and chart series "
+            "colors are not text. Inherited theme colors with no explicit sRGB are not judged. "
+            "These two warnings do not change the process exit code."
         ),
         "warnings": [],
     }
@@ -509,6 +650,8 @@ def audit(path):
                       "office_math_count": 0, "diagram_object_count": 0, "connector_count": 0,
                       "native_texts": [], "large_picture_hints": [], "warnings": []}
             words = 0.0
+            small_pts = []
+            pale_colors = []
             for shape, nested in objects(tree):
                 if is_diagram_object(shape):
                     record["diagram_object_count"] += 1
@@ -540,6 +683,9 @@ def audit(path):
                         if area >= .75:
                             record["large_picture_hints"].append({**identity, "canvas_area_ratio": round(area, 4), "interpretation": "Inspect visually; may be legitimate source figure or flattened slide."})
                 words += onscreen_words(shape, box, sh, nested)
+                found_small, found_pale = typography_findings(shape, box, sh, nested)
+                small_pts.extend(found_small)
+                pale_colors.extend(found_pale)
             shown = format_word_count(words)
             record["onscreen_word_count"] = shown
             record["onscreen_word_cap"] = WORD_CAP
@@ -587,6 +733,20 @@ def audit(path):
                     "code": "raw_latex_on_screen",
                     "examples": sorted(set(raw_hits))[:6],
                 })
+            if small_pts:
+                record["warnings"].append({
+                    "code": "font_below_min",
+                    "count": len(small_pts),
+                    "min_pt": _format_pt(min(small_pts)),
+                    "floor_pt": 18,
+                })
+            if pale_colors:
+                record["warnings"].append({
+                    "code": "low_contrast_text",
+                    "count": len(pale_colors),
+                    "examples": sorted(set(pale_colors))[:6],
+                    "minimum_ratio": CONTRAST_MIN_ON_WHITE,
+                })
             notes_part, notes = notes_body(zf, part)
             count = sum(not c.isspace() for c in notes)
             record.update({"notes_part": notes_part, "has_nonempty_body_notes": bool(count),
@@ -619,6 +779,14 @@ def audit(path):
         result["office_math_count"] = sum(p["office_math_count"] for p in pages)
         result["slides_with_office_math"] = [
             p["page"] for p in pages if p["office_math_count"]
+        ]
+        result["slides_with_font_below_min"] = [
+            p["page"] for p in pages
+            if any(item.get("code") == "font_below_min" for item in p["warnings"])
+        ]
+        result["slides_with_low_contrast_text"] = [
+            p["page"] for p in pages
+            if any(item.get("code") == "low_contrast_text" for item in p["warnings"])
         ]
     return result
 

@@ -1,0 +1,16 @@
+# Data-figure defaults. Native chart axes are unchanged.
+# Hex colors omit the leading hash because a hash starts a comment in this file.
+axes.prop_cycle: cycler('color', ['222222', 'C00000', '606060', 'BFBFBF'])
+axes.edgecolor: 222222
+axes.labelcolor: 222222
+text.color: 222222
+xtick.color: 222222
+ytick.color: 222222
+axes.spines.top: False
+axes.spines.right: False
+figure.facecolor: white
+axes.facecolor: white
+font.size: 16
+axes.labelsize: 16
+xtick.labelsize: 16
+ytick.labelsize: 16
