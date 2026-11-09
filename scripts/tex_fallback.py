@@ -15,6 +15,7 @@ the LibreOffice-visible fallback. ``shell-escape`` stays off.
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -116,6 +117,16 @@ def find_svg_converter():
 
 
 def toolchain_status(engine=None):
+    """Report TeX tools. ``STANFORD_FORMULA_DISABLE_TEX=1`` forces the mathtext rung."""
+    if os.environ.get("STANFORD_FORMULA_DISABLE_TEX") == "1":
+        return {
+            "engine": None,
+            "engine_path": None,
+            "png_converter": None,
+            "svg_converter": None,
+            "tex_png": False,
+            "tex_svg": False,
+        }
     found = find_engine(engine)
     png = find_png_converter()
     svg = find_svg_converter()

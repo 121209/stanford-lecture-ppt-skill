@@ -281,6 +281,54 @@ class TexFallbackTests(unittest.TestCase):
         fitted_ext = dict(re.findall(r'([A-Za-z0-9:]+)="([^"]*)"', fitted))
         self.assertLessEqual(int(fitted_ext["cx"]), 640080)
 
+    def test_mathtext_softmax_ignores_a_narrow_box(self):
+        from PIL import Image
+        inject = load("inject_omml")
+        narrow = inject.render_equation_png(
+            [r"$\mathrm{softmax}$"], 0.70, 0.42, "softmax", strict=True, inline=True,
+        )
+        wide = inject.render_equation_png(
+            [r"$\mathrm{softmax}$"], 1.40, 0.42, "softmax", strict=True, inline=True,
+        )
+        self.assertEqual(narrow[25], 6)
+        image_n = Image.open(BytesIO(narrow))
+        image_w = Image.open(BytesIO(wide))
+        self.assertEqual(image_n.size[1], image_w.size[1])
+        self.assertLess(abs(image_n.size[0] - image_w.size[0]), 8)
+        dpi = inject._png_dpi(narrow)
+        self.assertGreaterEqual(dpi, 300)
+        xfrm = (
+            '<a:xfrm><a:off x="7589520" y="3657600"/>'
+            '<a:ext cx="640080" cy="384048"/></a:xfrm>'
+        )
+        placed = inject._place_inline_natural(xfrm, image_n.size[0], image_n.size[1], dpi)
+        ext = dict(re.findall(r'([A-Za-z0-9:]+)="([^"]*)"', placed))
+        self.assertGreater(int(ext["cx"]), 640080)
+        pixels = image_n.load()
+        self.assertEqual(pixels[0, 0][3], 0)
+        self.assertEqual(pixels[image_n.size[0] - 1, 0][3], 0)
+
+    def test_disable_tex_hides_an_installed_engine(self):
+        tex = load("tex_fallback")
+        previous = os.environ.get("STANFORD_FORMULA_DISABLE_TEX")
+        os.environ["STANFORD_FORMULA_DISABLE_TEX"] = "1"
+        try:
+            status = tex.toolchain_status()
+        finally:
+            if previous is None:
+                os.environ.pop("STANFORD_FORMULA_DISABLE_TEX", None)
+            else:
+                os.environ["STANFORD_FORMULA_DISABLE_TEX"] = previous
+        self.assertFalse(status["tex_png"])
+        self.assertIsNone(status["engine"])
+        plan = tex.select_degradation(
+            compiler_ok=True, has_latex=True,
+            engine_present=status["engine"] is not None,
+            png_converter_present=status["png_converter"] is not None,
+        )
+        self.assertEqual(plan["picture"], "mathtext")
+        self.assertEqual(plan["omml"], "vendor")
+
     def test_stack_pngs_leaves_a_single_blob_unchanged(self):
         tex = load("tex_fallback")
         one = _png(8, 6, (34, 34, 34, 255))

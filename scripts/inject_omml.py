@@ -355,11 +355,14 @@ def mathtext_for_spec(spec, omml_xml):
     return _omml_plain(omml_xml) or "?"
 
 
+MATHTEXT_DPI = 400
+
+
 def _png_figure(draw, width_in, height_in):
     import matplotlib
     matplotlib.use("Agg", force=False)
     import matplotlib.pyplot as plt
-    figure = plt.figure(figsize=(width_in, height_in), dpi=400)
+    figure = plt.figure(figsize=(width_in, height_in), dpi=MATHTEXT_DPI)
     figure.patch.set_alpha(0)
     figure.patch.set_facecolor("none")
     axis = figure.add_axes([0, 0, 1, 1])
@@ -372,12 +375,39 @@ def _png_figure(draw, width_in, height_in):
         draw(axis, height_in)
         buffer = io.BytesIO()
         figure.savefig(
-            buffer, format="png", dpi=400,
+            buffer, format="png", dpi=MATHTEXT_DPI,
             transparent=True, facecolor="none",
-            bbox_inches="tight", pad_inches=0.06,
+            bbox_inches="tight", pad_inches=0.04,
         )
     finally:
         plt.close(figure)
+    return buffer.getvalue()
+
+
+def _crop_mathtext_png(blob, lock_height=False, pad_px=18):
+    """Crop to the ink so the aspect ratio is the formula, not the placeholder.
+
+    Inline pictures keep the full canvas height. That height is the shared
+    22pt strut, so ``d_k`` and ``softmax`` stay on one baseline. A tight crop
+    would throw the baseline away with the transparent margin.
+    """
+    from PIL import Image
+    image = Image.open(io.BytesIO(blob)).convert("RGBA")
+    bbox = image.getbbox()
+    if not bbox:
+        raise ValueError("mathtext PNG had no ink")
+    if lock_height:
+        image = image.crop((bbox[0], 0, bbox[2], image.height))
+        origin = (pad_px, 0)
+        size = (image.width + pad_px * 2, image.height)
+    else:
+        image = image.crop(bbox)
+        origin = (pad_px, pad_px)
+        size = (image.width + pad_px * 2, image.height + pad_px * 2)
+    canvas = Image.new("RGBA", size, (0, 0, 0, 0))
+    canvas.paste(image, origin, image)
+    buffer = io.BytesIO()
+    canvas.save(buffer, format="PNG", dpi=(MATHTEXT_DPI, MATHTEXT_DPI))
     return buffer.getvalue()
 
 
@@ -401,8 +431,14 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False, i
     ``strict`` is set, a command mathtext cannot draw aborts the inject.
     Runs-only specs may still fall back to the OMML's visible text.
     """
-    width_in = max(1.2, min(12.0, float(width_in)))
-    height_in = max(0.45, min(3.5, float(height_in)))
+    # Inline is always drawn at 22pt on a fixed-height canvas, then cropped
+    # horizontally. Sizing the figure from a 0.70 in slot and fitting the PNG
+    # back into that slot is what crushed ``softmax``.
+    if inline:
+        width_in, height_in = 4.0, 0.68
+    else:
+        width_in = max(2.4, min(12.0, float(width_in)))
+        height_in = max(0.9, min(3.5, float(height_in)))
     try:
         import matplotlib
         matplotlib.use("Agg", force=False)
@@ -415,10 +451,18 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False, i
     def draw_math(axis, height):
         count = max(1, len(expressions))
         for index, expr in enumerate(expressions):
-            size = _fallback_fontsize(height, count, expr, inline=inline)
+            if inline:
+                size = 22
+                y = 0.40
+                valign = "baseline"
+            else:
+                size = _fallback_fontsize(height, count, expr, inline=False)
+                y = 1 - (index + 0.5) / count
+                valign = "center"
             axis.text(
-                0.03, 1 - (index + 0.5) / count, expr,
-                fontsize=size, color="#222222", va="center", ha="left",
+                0.02, y, expr,
+                fontsize=size, color="#222222", va=valign, ha="left",
+                clip_on=False,
             )
 
     if strict:
@@ -433,7 +477,7 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False, i
                     "Refusing to place LaTeX source on the slide."
                 ) from exc
     try:
-        return _png_figure(draw_math, width_in, height_in)
+        blob = _png_figure(draw_math, width_in, height_in)
     except Exception as exc:
         if strict:
             raise ValueError(
@@ -442,11 +486,13 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False, i
             ) from exc
         def draw_plain(axis, height):
             axis.text(
-                0.03, 0.5, plain or "?",
+                0.02, 0.5, plain or "?",
                 fontsize=max(20, min(40, height * 24)),
-                color="#222222", va="center", ha="left", fontfamily="DejaVu Sans",
+                color="#222222", va="center", ha="left",
+                fontfamily="DejaVu Sans", clip_on=False,
             )
-        return _png_figure(draw_plain, width_in, height_in)
+        blob = _png_figure(draw_plain, width_in, height_in)
+    return _crop_mathtext_png(blob, lock_height=inline)
 
 
 def _a14_math(omath_xml):
