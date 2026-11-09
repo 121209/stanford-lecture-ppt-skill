@@ -10,16 +10,19 @@ compiler raises and pandoc is installed. Otherwise the command fails.
 The equation is written as ``mc:AlternateContent`` / ``mc:Choice Requires="a14"``
 / ``a14:m`` / ``m:oMathPara`` / ``m:oMath`` (MS-ODRAWXML). ``mc:Fallback`` is a
 high-DPI transparent PNG of the same formula, fitted to the box without stretching.
-The picture's mathtext string rewrites ``\\frac`` to ``\\dfrac`` so fractions are
-display style. The string sent to the OMML compiler is not rewritten.
-LaTeX source is never written onto a slide.
+When the spec has LaTeX and a TeX engine plus a PNG converter are installed, that
+PNG is a real TeX render (see ``tex_fallback.py``). Otherwise it is the mathtext
+picture: ``\\frac`` is rewritten to ``\\dfrac`` for the picture only. The string
+sent to the OMML compiler is not rewritten. A missing TeX install does not fail
+the page. LaTeX source is never written onto a slide.
 
-Rendering the fallback PNG needs matplotlib.
+The mathtext rung needs matplotlib. The TeX rung does not, when it succeeds.
 """
 import argparse
 import importlib.util
 import io
 import json
+import os
 import posixpath
 import re
 import shutil
@@ -352,11 +355,14 @@ def mathtext_for_spec(spec, omml_xml):
     return _omml_plain(omml_xml) or "?"
 
 
+MATHTEXT_DPI = 400
+
+
 def _png_figure(draw, width_in, height_in):
     import matplotlib
     matplotlib.use("Agg", force=False)
     import matplotlib.pyplot as plt
-    figure = plt.figure(figsize=(width_in, height_in), dpi=400)
+    figure = plt.figure(figsize=(width_in, height_in), dpi=MATHTEXT_DPI)
     figure.patch.set_alpha(0)
     figure.patch.set_facecolor("none")
     axis = figure.add_axes([0, 0, 1, 1])
@@ -369,12 +375,39 @@ def _png_figure(draw, width_in, height_in):
         draw(axis, height_in)
         buffer = io.BytesIO()
         figure.savefig(
-            buffer, format="png", dpi=400,
+            buffer, format="png", dpi=MATHTEXT_DPI,
             transparent=True, facecolor="none",
-            bbox_inches="tight", pad_inches=0.06,
+            bbox_inches="tight", pad_inches=0.04,
         )
     finally:
         plt.close(figure)
+    return buffer.getvalue()
+
+
+def _crop_mathtext_png(blob, lock_height=False, pad_px=18):
+    """Crop to the ink so the aspect ratio is the formula, not the placeholder.
+
+    Inline pictures keep the full canvas height. That height is the shared
+    22pt strut, so ``d_k`` and ``softmax`` stay on one baseline. A tight crop
+    would throw the baseline away with the transparent margin.
+    """
+    from PIL import Image
+    image = Image.open(io.BytesIO(blob)).convert("RGBA")
+    bbox = image.getbbox()
+    if not bbox:
+        raise ValueError("mathtext PNG had no ink")
+    if lock_height:
+        image = image.crop((bbox[0], 0, bbox[2], image.height))
+        origin = (pad_px, 0)
+        size = (image.width + pad_px * 2, image.height)
+    else:
+        image = image.crop(bbox)
+        origin = (pad_px, pad_px)
+        size = (image.width + pad_px * 2, image.height + pad_px * 2)
+    canvas = Image.new("RGBA", size, (0, 0, 0, 0))
+    canvas.paste(image, origin, image)
+    buffer = io.BytesIO()
+    canvas.save(buffer, format="PNG", dpi=(MATHTEXT_DPI, MATHTEXT_DPI))
     return buffer.getvalue()
 
 
@@ -398,8 +431,14 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False, i
     ``strict`` is set, a command mathtext cannot draw aborts the inject.
     Runs-only specs may still fall back to the OMML's visible text.
     """
-    width_in = max(1.2, min(12.0, float(width_in)))
-    height_in = max(0.45, min(3.5, float(height_in)))
+    # Inline is always drawn at 22pt on a fixed-height canvas, then cropped
+    # horizontally. Sizing the figure from a 0.70 in slot and fitting the PNG
+    # back into that slot is what crushed ``softmax``.
+    if inline:
+        width_in, height_in = 4.0, 0.68
+    else:
+        width_in = max(2.4, min(12.0, float(width_in)))
+        height_in = max(0.9, min(3.5, float(height_in)))
     try:
         import matplotlib
         matplotlib.use("Agg", force=False)
@@ -412,10 +451,18 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False, i
     def draw_math(axis, height):
         count = max(1, len(expressions))
         for index, expr in enumerate(expressions):
-            size = _fallback_fontsize(height, count, expr, inline=inline)
+            if inline:
+                size = 22
+                y = 0.40
+                valign = "baseline"
+            else:
+                size = _fallback_fontsize(height, count, expr, inline=False)
+                y = 1 - (index + 0.5) / count
+                valign = "center"
             axis.text(
-                0.03, 1 - (index + 0.5) / count, expr,
-                fontsize=size, color="#222222", va="center", ha="left",
+                0.02, y, expr,
+                fontsize=size, color="#222222", va=valign, ha="left",
+                clip_on=False,
             )
 
     if strict:
@@ -430,7 +477,7 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False, i
                     "Refusing to place LaTeX source on the slide."
                 ) from exc
     try:
-        return _png_figure(draw_math, width_in, height_in)
+        blob = _png_figure(draw_math, width_in, height_in)
     except Exception as exc:
         if strict:
             raise ValueError(
@@ -439,11 +486,13 @@ def render_equation_png(expressions, width_in, height_in, plain, strict=False, i
             ) from exc
         def draw_plain(axis, height):
             axis.text(
-                0.03, 0.5, plain or "?",
+                0.02, 0.5, plain or "?",
                 fontsize=max(20, min(40, height * 24)),
-                color="#222222", va="center", ha="left", fontfamily="DejaVu Sans",
+                color="#222222", va="center", ha="left",
+                fontfamily="DejaVu Sans", clip_on=False,
             )
-        return _png_figure(draw_plain, width_in, height_in)
+        blob = _png_figure(draw_plain, width_in, height_in)
+    return _crop_mathtext_png(blob, lock_height=inline)
 
 
 def _a14_math(omath_xml):
@@ -551,12 +600,71 @@ def _fit_xfrm(xfrm, png_w, png_h):
     return fitted
 
 
+def _png_dpi(blob):
+    """DPI written into the TeX PNG, or None when the file does not say."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        image = Image.open(io.BytesIO(blob))
+    except Exception:
+        return None
+    dpi = image.info.get("dpi")
+    if isinstance(dpi, tuple) and dpi and dpi[0] and float(dpi[0]) >= 300:
+        return float(dpi[0])
+    return None
+
+
+def _place_inline_natural(xfrm, png_w, png_h, dpi):
+    """Place an inline TeX PNG at its rendered size. Do not squash it into the box.
+
+    A 0.7 in slot cannot hold ``softmax`` at 22pt. Scaling the picture down to
+    that slot makes the word unreadably small. The shape grows to the right and,
+    when needed, around the placeholder's vertical center. ``d_k``, ``\\lambda``
+    and ``softmax`` stay the same point size, so their baselines match.
+    """
+    ext = _attrs(xfrm, "a:ext")
+    off = _attrs(xfrm, "a:off")
+    try:
+        cy = int(ext.get("cy", "0"))
+        ox = int(off.get("x", "0"))
+        oy = int(off.get("y", "0"))
+    except ValueError:
+        return xfrm
+    if dpi <= 0 or png_w <= 0 or png_h <= 0 or cy <= 0:
+        return xfrm
+    new_cx = max(1, int(round(png_w / float(dpi) * EMU_IN)))
+    new_cy = max(1, int(round(png_h / float(dpi) * EMU_IN)))
+    new_y = oy + (cy - new_cy) // 2
+    if new_y < 0:
+        new_y = 0
+    placed = _set_xml_attr(xfrm, "a:ext", "cx", new_cx)
+    placed = _set_xml_attr(placed, "a:ext", "cy", new_cy)
+    placed = _set_xml_attr(placed, "a:off", "x", ox)
+    placed = _set_xml_attr(placed, "a:off", "y", new_y)
+    return placed
+
+
+def _replace_shape_xfrm(shape, xfrm):
+    updated, count = re.subn(
+        r"<a:xfrm\b[^>]*>.*?</a:xfrm>",
+        lambda _match: xfrm,
+        shape,
+        count=1,
+        flags=re.DOTALL,
+    )
+    if count != 1:
+        return shape
+    return updated
+
+
 def _fallback_shape(xfrm, rel_id, shape_id):
     return (
         '<p:sp><p:nvSpPr><p:cNvPr id="%d" name="Equation fallback"/>'
         "<p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>%s"
         '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-        '<a:blipFill><a:blip r:embed="%s"/></a:blipFill>'
+        '<a:blipFill><a:blip r:embed="%s"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>'
         "<a:ln><a:noFill/></a:ln>"
         "</p:spPr></p:sp>"
     ) % (shape_id, xfrm, rel_id)
@@ -624,6 +732,109 @@ def _next_shape_id(xml):
     return (max(found) if found else 1) + 1
 
 
+def _load_tex_fallback():
+    """Load the optional TeX picture renderer. It does not touch the OMML compiler."""
+    name = "tex_fallback"
+    loaded = sys.modules.get(name)
+    if loaded is not None and hasattr(loaded, "select_degradation"):
+        return loaded
+    path = Path(__file__).resolve().parent / "tex_fallback.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _spec_latex(spec):
+    if isinstance(spec, dict) and isinstance(spec.get("latex"), str) and spec["latex"].strip():
+        return spec["latex"].strip()
+    return None
+
+
+def _note_tex_degrade(formula_ids, exc):
+    detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+    sys.stderr.write(
+        "TeX fallback unavailable for %s; using mathtext. %s\n"
+        % (",".join(formula_ids), detail)
+    )
+
+
+def _write_requested_sidecars(tex, formulas, used_ids):
+    """Write ``{id}.tex`` when ``STANFORD_FORMULA_TEX_DIR`` is set. Never into the pptx."""
+    folder = os.environ.get("STANFORD_FORMULA_TEX_DIR")
+    if not folder:
+        return
+    root = Path(folder)
+    root.mkdir(parents=True, exist_ok=True)
+    for item in used_ids:
+        spec = formulas.get(item)
+        latex = _spec_latex(spec)
+        if not latex:
+            continue
+        document = tex.build_latex_document(latex, display=not spec.get("inline"))
+        tex.write_tex_sidecar(root / ("%s.tex" % item), document)
+
+
+def _fallback_png(formulas, used_ids, expressions, width, height, plain, strict, inline):
+    """Picture rung: TeX PNG when the toolchain and a LaTeX source exist, else mathtext.
+
+    OMML has already been compiled. Pandoc is not involved here. A TeX failure
+    degrades to mathtext instead of failing the page.
+    """
+    tex = _load_tex_fallback()
+    sources = []
+    has_latex = True
+    for item in used_ids:
+        spec = formulas.get(item)
+        latex = _spec_latex(spec)
+        if not latex:
+            has_latex = False
+            break
+        sources.append((latex, not spec.get("inline")))
+    status = tex.toolchain_status()
+    plan = tex.select_degradation(
+        compiler_ok=True,
+        pandoc_present=shutil.which("pandoc") is not None,
+        has_latex=has_latex,
+        engine_present=status["engine"] is not None,
+        png_converter_present=status["png_converter"] is not None,
+        svg_converter_present=status["svg_converter"] is not None,
+        mathtext_present=True,
+    )
+    _write_requested_sidecars(tex, formulas, used_ids)
+    if plan["picture"] == "tex-png":
+        try:
+            blobs = []
+            for latex, as_display in sources:
+                if as_display:
+                    size = _fallback_fontsize(height, len(sources), latex, inline=False)
+                    dpi = 600
+                else:
+                    size = 22
+                    dpi = tex.DEFAULT_DPI
+                blobs.append(
+                    tex.render_tex_png(
+                        latex,
+                        display=as_display,
+                        dpi=dpi,
+                        font_size=size,
+                        trim=as_display,
+                    )
+                )
+            return tex.stack_pngs(blobs)
+        except (tex.TexFallbackError, OSError, subprocess.TimeoutExpired) as exc:
+            _note_tex_degrade(used_ids, exc)
+    return render_equation_png(
+        expressions,
+        width,
+        max(height, 0.45 * len(expressions)),
+        plain,
+        strict=strict,
+        inline=inline,
+    )
+
+
 def transform_slide(xml_text, formulas, rels_text, media_stem):
     """Return slide XML, slide rels XML, and ``{part_name: png_bytes}``."""
     cache = {}
@@ -669,12 +880,16 @@ def transform_slide(xml_text, formulas, rels_text, media_stem):
             isinstance(formulas.get(item), dict) and formulas[item].get("inline")
             for item in used_ids
         )
-        png = render_equation_png(
-            expressions, width, max(height, 0.45 * len(expressions)), plain,
-            strict=strict, inline=inline,
+        png = _fallback_png(
+            formulas, used_ids, expressions, width, height, plain, strict, inline,
         )
         png_w, png_h = _png_size(png)
-        xfrm = _fit_xfrm(xfrm, png_w, png_h)
+        tex_dpi = _png_dpi(png)
+        if inline and tex_dpi:
+            xfrm = _place_inline_natural(xfrm, png_w, png_h, tex_dpi)
+            choice = _replace_shape_xfrm(choice, xfrm)
+        else:
+            xfrm = _fit_xfrm(xfrm, png_w, png_h)
         rel_id = _fresh_rid(rels)
         slug = "-".join(used_ids)
         part = "ppt/media/%s-%s.png" % (media_stem, slug)

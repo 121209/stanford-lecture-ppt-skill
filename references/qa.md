@@ -37,7 +37,7 @@
 ### 图优先与公式
 
 - [ ] 算法、架构、多步流程页有可点选的形状或连接线，或是合法「缺图」页（版心写明缺哪一张、为什么缺）。纯文字算法页不能交付。
-- [ ] 屏幕文字没有 RAW LaTeX（`\frac`、`\sum`、`\lambda`、`^{`、`_{`）。公式页在 LibreOffice 里要么高 DPI 图清晰，要么是带图片回退的原生 OMML，并且回退图可见。裸 OMML 画成空白是失败；残留 `{{MATH:` 是失败；模糊的公式图是失败。口径见 [公式](formulas.md)。
+- [ ] 屏幕文字没有 RAW LaTeX（`\frac`、`\sum`、`\lambda`、`^{`、`_{`）。公式页在 LibreOffice 里要么高 DPI 图清晰，要么是带图片回退的原生 OMML，并且回退图可见。有 TeX 时这张回退图应是透明的高 DPI TeX PNG；没有 TeX 时 mathtext 也必须可见、不模糊。裸 OMML 画成空白是失败；残留 `{{MATH:` 是失败；模糊的公式图是失败。口径见 [公式](formulas.md)。
 - [ ] 证据图有 Source。裁图仍保留坐标轴、图例、色条和 panel 字母。AI 图没有被写成论文原图，也没有用来仿造曲线或数值。
 - [ ] 纯文字页没有失控。目标是整稿无视觉页不超过 30%。论文精读的方法段和结果段几乎每页都要有图、表、公式或原生示意图。
 - [ ] `python scripts/audit_pptx.py` 里的 `algorithm_page_missing_diagram`、`raw_latex_on_screen`、`office_math_missing_fallback`、`empty_lower_content_band`、`onscreen_text_over_word_cap`、`font_below_min`、`low_contrast_text` 都只记警告，退出码不变。退出码 0 只说明包能读完。出现前三条时仍然不能交付。`font_below_min` 是页脚／来源带外小于 18pt 的可见正文；`low_contrast_text` 是相对白底低于 4.5:1 的文字色，以及文字色 `#BFBFBF`。`algorithm_page_missing_diagram` 只看标题里的概念词（方法、算法、架构、框架、流程），不看模型名，并且跳过封面和已经有表、图、带图片回退的公式或图示的页。`office_math_count` 用来确认 OMML 已写入，不能代替目视。

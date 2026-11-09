@@ -744,7 +744,7 @@ class HelperTests(unittest.TestCase):
             self.assertNotIn(b'{{MATH:', blob)
             self.assertNotIn(b'\\log', blob)
             self.assertNotIn(b'\\sum', blob)
-            self.assertNotIn(b'<a:fillRect', blob)
+            self.assertIn(b'<a:stretch><a:fillRect/></a:stretch>', blob)
             self.assertIn(b'undOvr', blob)
             report = audit.audit(dest)
             self.assertEqual(report['office_math_count'], 1)
@@ -772,10 +772,22 @@ class HelperTests(unittest.TestCase):
             latex_h = self._ink_height(latex_png)
             self.assertGreater(latex_h / float(runs_h), 1.3)
             aligned = folder/'aligned.pptx'
-            with self.assertRaises(ValueError):
-                inject.inject_pptx(src, {
-                    'll': {'latex': r'\begin{aligned}a&=b\\c&=d\end{aligned}'},
-                }, aligned)
+            # The OMML compiler accepts aligned. mathtext does not, so without
+            # TeX the inject must still fail closed. A real TeX install may draw it.
+            tex = inject._load_tex_fallback()
+            real_status = tex.toolchain_status
+            tex.toolchain_status = lambda: {
+                'engine': None, 'engine_path': None,
+                'png_converter': None, 'svg_converter': None,
+                'tex_png': False, 'tex_svg': False,
+            }
+            try:
+                with self.assertRaises(ValueError):
+                    inject.inject_pptx(src, {
+                        'll': {'latex': r'\begin{aligned}a&=b\\c&=d\end{aligned}'},
+                    }, aligned)
+            finally:
+                tex.toolchain_status = real_status
             self.assertFalse(aligned.exists())
             if soffice:
                 ratio = self._render_nonwhite_ratio(soffice, dest, folder/'render')
