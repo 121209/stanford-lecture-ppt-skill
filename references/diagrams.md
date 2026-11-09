@@ -115,7 +115,7 @@ python scripts/diagram_helpers.py --samples assets/diagram-samples/figure-first.
 
 `--samples` 会写出三页匿名样张：四步流程、双栏架构、公式加符号说明。样张只示范版式，数字和步骤都不是论文结果。`assets/demo.pptx` 可以另有一页图优先示例，不替换前面各页的内容。
 
-颜色锁死：填充白，普通描边和箭头 `#222222`，强调节点描边 `#C00000`，正文 `#222222`，标题 `#C00000`。去掉主题样式，避免被主题蓝盖掉。
+颜色锁死：填充白，普通描边和箭头 `#222222`，强调节点描边 `#C00000`，正文 `#222222`，标题 `#C00000`。去掉主题样式，避免被主题蓝盖掉。用 matplotlib 画数据图时，可以套 `assets/presentation.mplstyle`：色序 `#222222`、`#C00000`、`#606060`、`#BFBFBF`，并去掉上边框和右边框。
 
 论文里已经给出的柱状对比，用 `add_bar_chart`（`scripts/chart_helpers.py`，`diagram_helpers.add_bar_chart` 转过去）。它写原生 `c:chart`：没有图例和图表标题，数据标签打开，数值轴从 0 起并且隐藏。要强调的那一根是 `#C00000`，其余是 `#BFBFBF`。python-pptx 有时写出负数 `c:axId`，函数会改成正数，否则 Office 架构校验失败。柱上的数由调用方传入，并且应当是论文里的数。示意流程仍用形状。
 

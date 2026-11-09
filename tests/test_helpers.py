@@ -211,7 +211,7 @@ class HelperTests(unittest.TestCase):
         )
         self.assertEqual(
             [item['code'] for item in report['slides'][3]['warnings']],
-            ['onscreen_text_over_word_cap'],
+            ['onscreen_text_over_word_cap', 'font_below_min'],
         )
         self.assertFalse(report['slides'][1]['warnings'])
         self.assertEqual(report['slides_with_empty_lower_content_band'], [])
@@ -810,13 +810,15 @@ class HelperTests(unittest.TestCase):
 
     def _ink_height(self, blob):
         from PIL import Image
-        image = Image.open(BytesIO(blob)).convert('RGB')
+        image = Image.open(BytesIO(blob)).convert('RGBA')
         pixels = image.load()
         width, height = image.size
         top, bottom = height, 0
         for y in range(height):
             for x in range(width):
-                red, green, blue = pixels[x, y]
+                red, green, blue, alpha = pixels[x, y]
+                if alpha < 16:
+                    continue
                 if red < 240 or green < 240 or blue < 240:
                     top = min(top, y)
                     bottom = max(bottom, y)
@@ -928,6 +930,202 @@ class HelperTests(unittest.TestCase):
                 self.assertGreater(ratio, 0.001, 'LibreOffice chart was blank')
         with self.assertRaises(ValueError):
             charts._numbers([-1, 2])
+
+    def test_font_floor_and_contrast_warn_without_changing_exit_code(self):
+        footer_y = 6200000
+        def shape(number, text, sz, y, color=None):
+            fill = ''
+            if color:
+                fill = '<a:solidFill><a:srgbClr val="%s"/></a:solidFill>' % color
+            return (
+                '<p:sp>'
+                '<p:nvSpPr><p:cNvPr id="%d" name="t"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>'
+                '<p:spPr><a:xfrm><a:off x="700000" y="%d"/><a:ext cx="8000000" cy="400000"/></a:xfrm>'
+                '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+                '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="%d">%s</a:rPr>'
+                '<a:t>%s</a:t></a:r></a:p></p:txBody></p:sp>'
+            ) % (number, y, sz, fill, text)
+        page_number = (
+            '<p:sp><p:nvSpPr><p:cNvPr id="8" name="num"/><p:cNvSpPr/><p:nvPr>'
+            '<p:ph type="sldNum"/></p:nvPr></p:nvSpPr>'
+            '<p:spPr><a:xfrm><a:off x="11000000" y="1600000"/><a:ext cx="500000" cy="300000"/></a:xfrm></p:spPr>'
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="1200"/>'
+            '<a:t>2</a:t></a:r></a:p></p:txBody></p:sp>'
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'type.pptx'
+            write_raw_deck(path, [
+                shape(2, '封面标题', 3200, 1600000, '222222'),
+                ''.join([
+                    shape(2, '看不清的正文', 1400, 1600000, '222222'),
+                    shape(3, '十八点正文', 1800, 2200000, '222222'),
+                    shape(4, '十六点也低于正文硬底', 1600, 2800000),
+                    shape(5, '来源：正文区来源行', 1400, 3400000, '606060'),
+                    shape(6, '来源：页脚来源', 1300, footer_y, '606060'),
+                    page_number,
+                ]),
+                ''.join([
+                    shape(2, '禁用浅灰', 2000, 1600000, 'BFBFBF'),
+                    shape(3, '白字', 2000, 2200000, 'FFFFFF'),
+                    shape(4, '墨色', 2000, 2800000, '222222'),
+                    shape(5, '辅助灰', 2000, 3400000, '606060'),
+                    shape(6, '红色标题', 2000, 4000000, 'C00000'),
+                ]),
+            ])
+            report = audit.audit(path)
+            saved = sys.argv
+            try:
+                sys.argv = ['audit_pptx.py', str(path)]
+                with redirect_stdout(StringIO()):
+                    code = audit.main()
+            finally:
+                sys.argv = saved
+        self.assertEqual(code, 0)
+        self.assertEqual(report['slides_with_font_below_min'], [2])
+        self.assertEqual(report['slides_with_low_contrast_text'], [3])
+        self.assertEqual(report['slides'][0]['warnings'], [])
+        font = next(item for item in report['slides'][1]['warnings'] if item['code'] == 'font_below_min')
+        self.assertEqual(font['floor_pt'], 18)
+        self.assertEqual(font['min_pt'], 14)
+        self.assertEqual(font['count'], 2)
+        pale = next(item for item in report['slides'][2]['warnings'] if item['code'] == 'low_contrast_text')
+        self.assertEqual(pale['examples'], ['BFBFBF', 'FFFFFF'])
+        self.assertEqual(pale['minimum_ratio'], 4.5)
+        self.assertGreater(audit.contrast_on_white('222222'), 4.5)
+        self.assertGreater(audit.contrast_on_white('C00000'), 4.5)
+        self.assertGreater(audit.contrast_on_white('606060'), 4.5)
+        self.assertLess(audit.contrast_on_white('BFBFBF'), 4.5)
+
+    def test_dfrac_fallback_keeps_omml_frac_and_png_is_transparent(self):
+        from PIL import Image
+        inject = load('inject_omml')
+        latex = r'\frac{QK^{\top}}{\sqrt{d_k}}'
+        seen = []
+        original = inject.omml_from_vendor
+        def spy(source):
+            seen.append(source)
+            return original(source)
+        inject.omml_from_vendor = spy
+        try:
+            omml = inject.omml_for_spec({'latex': latex})
+        finally:
+            inject.omml_from_vendor = original
+        self.assertEqual(seen, [latex])
+        self.assertIn('<m:f>', omml)
+        self.assertNotIn('dfrac', omml)
+        drawn = inject.mathtext_for_spec({'latex': latex}, omml)
+        self.assertIn(r'\dfrac', drawn)
+        self.assertNotRegex(drawn, r'(?<![A-Za-z])\\frac\b')
+        runs = inject.mathtext_for_spec(
+            {'runs': [{'frac': {'num': '1', 'den': 'n'}}]}, '',
+        )
+        self.assertIn(r'\dfrac{1}{n}', runs)
+        self.assertNotIn(r'\frac{', runs)
+        self.assertGreaterEqual(inject._fallback_fontsize(0.45, 1, drawn), 22)
+        self.assertGreater(
+            inject._fallback_fontsize(1.0, 1, drawn),
+            inject._fallback_fontsize(1.0, 1, 'x'),
+        )
+        self.assertGreaterEqual(
+            inject._fallback_fontsize(0.8, 1, 'd_k', inline=True),
+            inject._fallback_fontsize(0.8, 1, 'd_k', inline=False),
+        )
+        png = inject.render_equation_png([drawn], 6.0, 1.2, 'frac', strict=True)
+        self.assertEqual(png[25], 6)
+        image = Image.open(BytesIO(png)).convert('RGBA')
+        pixels = image.load()
+        width, height = image.size
+        self.assertEqual(pixels[0, 0][3], 0)
+        self.assertEqual(pixels[width - 1, 0][3], 0)
+        self.assertEqual(pixels[0, height - 1][3], 0)
+        near_white = 0
+        dark = 0
+        for y in range(height):
+            for x in range(width):
+                red, green, blue, alpha = pixels[x, y]
+                if alpha < 16:
+                    continue
+                if red >= 248 and green >= 248 and blue >= 248:
+                    near_white += 1
+                elif red < 80 and green < 80 and blue < 80:
+                    dark += 1
+        self.assertEqual(near_white, 0)
+        self.assertGreater(dark, 20)
+
+    def test_short_inline_latex_is_omml_not_ascii(self):
+        inline = load('inline_math')
+        inject = load('inject_omml')
+        softmax = inline.prepare_inline_spec(r'\mathrm{softmax}')
+        self.assertEqual(softmax['latex'], r'\mathrm{softmax}')
+        self.assertTrue(softmax['inline'])
+        upright = inject.omml_for_spec(softmax)
+        self.assertIn('softmax', upright)
+        self.assertNotIn('mathrm', upright)
+        with self.assertRaises(ValueError):
+            inline.prepare_inline_spec('查询维度 d_k 的缩放')
+        with self.assertRaises(ValueError):
+            inline.prepare_inline_spec(
+                r'\mathrm{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V'
+            )
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            src = folder/'in.pptx'
+            write_deck(src, [[
+                {'text': '{{MATH:dk}}', 'sz': 2000, 'y': 1800000},
+                {'text': '{{MATH:lam}}', 'sz': 2000, 'y': 2500000},
+                {'text': '{{MATH:sm}}', 'sz': 2000, 'y': 3200000},
+            ]])
+            # Keep the lower band occupied so this fixture is only about the math.
+            dest = folder/'out.pptx'
+            inline.inject_inline_pptx(src, {
+                'dk': 'd_k',
+                'lam': r'\lambda(t)',
+                'sm': {'latex': r'\mathrm{softmax}'},
+            }, dest)
+            report = audit.audit(dest)
+            self.assertEqual(report['office_math_count'], 3)
+            self.assertEqual(report['slides_with_raw_latex'], [])
+            self.assertEqual(report['slides_with_invalid_office_math'], [])
+            blob = dest.read_bytes()
+            self.assertNotIn(b'{{MATH:', blob)
+            self.assertNotIn(b'\\lambda', blob)
+            self.assertNotIn(b'\\mathrm', blob)
+            with zipfile.ZipFile(dest) as package:
+                slide = package.read('ppt/slides/slide1.xml').decode('utf-8')
+                pngs = [
+                    package.read(name)
+                    for name in package.namelist()
+                    if name.startswith('ppt/media/') and name.endswith('.png')
+                ]
+            self.assertIn('<m:sSub>', slide)
+            self.assertIn('λ', slide)
+            self.assertIn('softmax', slide)
+            self.assertNotIn('d_k', slide)
+            self.assertNotIn('x_i', slide)
+            self.assertNotRegex(slide, r'[A-Za-z]_[A-Za-z0-9]')
+            self.assertIn('mc:AlternateContent', slide)
+            self.assertIn('mc:Fallback', slide)
+            self.assertTrue(pngs)
+            for png in pngs:
+                self.assertEqual(png[25], 6)
+
+    def test_presentation_style_uses_lab_colors(self):
+        try:
+            import matplotlib
+            matplotlib.use('Agg', force=False)
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest('matplotlib is not installed')
+        path = ROOT/'assets'/'presentation.mplstyle'
+        previous = matplotlib.rcParams.copy()
+        try:
+            plt.style.use(str(path))
+            cycle = [item['color'] for item in plt.rcParams['axes.prop_cycle']]
+            self.assertEqual(cycle, ['#222222', '#C00000', '#606060', '#BFBFBF'])
+            self.assertFalse(plt.rcParams['axes.spines.top'])
+            self.assertFalse(plt.rcParams['axes.spines.right'])
+        finally:
+            matplotlib.rcParams.update(previous)
 
     def test_audit_samples_exit_zero(self):
         for sample in (
