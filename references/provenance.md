@@ -28,6 +28,7 @@
 | [PlutoLei/paperbanana-skill](https://github.com/PlutoLei/paperbanana-skill) | `editable` 失败即停，禁止静默退回整页 image 还声称可编辑 |
 | [mermaid2pptx](https://github.com/serendipitynz/mermaid2pptx) 与 [pptx-diagram](https://github.com/thititongumpun/skills) | flowchart / sequence 可以落成可编辑的形状和连接线。组会默认用 python-pptx 手摆同一类节点表 |
 | [nature-figure](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-figure) | AI 生图仅在用户明示时使用；产出是概念草稿，不是数据图；架构优先手绘矢量 |
-| [nature-paper2ppt](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-paper2ppt) | 材料里有图时，结果页不做纯文字；裁图保留轴、图例、色条和 panel 标号 |
+| [nature-paper2ppt](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-paper2ppt) | 材料里有图时，结果页不做纯文字；裁图保留轴、图例、色条和 panel 标号。论文公式面板的裁图不是本仓库的公式主路径 |
+| [nature-image2ppt](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-image2ppt) 的 `formula_renderer.py` | 真 TeX（`xelatex` / `lualatex` / `pdflatex`）加 `standalone`、amsmath/mathtools/bm，PDF 转高 DPI PNG 或 SVG，并保留 `.tex`。本仓库只把这套渲染用作 OMML 的图片回退。不把公式标成 `editable: false`，也不在缺 TeX 时整页失败 |
 
 这些来源不是本项目的隶属方。CS329 的白底、红强调和黑灰正文保持不变。

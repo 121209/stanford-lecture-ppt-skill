@@ -10,16 +10,19 @@ compiler raises and pandoc is installed. Otherwise the command fails.
 The equation is written as ``mc:AlternateContent`` / ``mc:Choice Requires="a14"``
 / ``a14:m`` / ``m:oMathPara`` / ``m:oMath`` (MS-ODRAWXML). ``mc:Fallback`` is a
 high-DPI transparent PNG of the same formula, fitted to the box without stretching.
-The picture's mathtext string rewrites ``\\frac`` to ``\\dfrac`` so fractions are
-display style. The string sent to the OMML compiler is not rewritten.
-LaTeX source is never written onto a slide.
+When the spec has LaTeX and a TeX engine plus a PNG converter are installed, that
+PNG is a real TeX render (see ``tex_fallback.py``). Otherwise it is the mathtext
+picture: ``\\frac`` is rewritten to ``\\dfrac`` for the picture only. The string
+sent to the OMML compiler is not rewritten. A missing TeX install does not fail
+the page. LaTeX source is never written onto a slide.
 
-Rendering the fallback PNG needs matplotlib.
+The mathtext rung needs matplotlib. The TeX rung does not, when it succeeds.
 """
 import argparse
 import importlib.util
 import io
 import json
+import os
 import posixpath
 import re
 import shutil
@@ -624,6 +627,96 @@ def _next_shape_id(xml):
     return (max(found) if found else 1) + 1
 
 
+def _load_tex_fallback():
+    """Load the optional TeX picture renderer. It does not touch the OMML compiler."""
+    name = "tex_fallback"
+    loaded = sys.modules.get(name)
+    if loaded is not None and hasattr(loaded, "select_degradation"):
+        return loaded
+    path = Path(__file__).resolve().parent / "tex_fallback.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _spec_latex(spec):
+    if isinstance(spec, dict) and isinstance(spec.get("latex"), str) and spec["latex"].strip():
+        return spec["latex"].strip()
+    return None
+
+
+def _note_tex_degrade(formula_ids, exc):
+    detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+    sys.stderr.write(
+        "TeX fallback unavailable for %s; using mathtext. %s\n"
+        % (",".join(formula_ids), detail)
+    )
+
+
+def _write_requested_sidecars(tex, formulas, used_ids):
+    """Write ``{id}.tex`` when ``STANFORD_FORMULA_TEX_DIR`` is set. Never into the pptx."""
+    folder = os.environ.get("STANFORD_FORMULA_TEX_DIR")
+    if not folder:
+        return
+    root = Path(folder)
+    root.mkdir(parents=True, exist_ok=True)
+    for item in used_ids:
+        spec = formulas.get(item)
+        latex = _spec_latex(spec)
+        if not latex:
+            continue
+        document = tex.build_latex_document(latex, display=not spec.get("inline"))
+        tex.write_tex_sidecar(root / ("%s.tex" % item), document)
+
+
+def _fallback_png(formulas, used_ids, expressions, width, height, plain, strict, inline):
+    """Picture rung: TeX PNG when the toolchain and a LaTeX source exist, else mathtext.
+
+    OMML has already been compiled. Pandoc is not involved here. A TeX failure
+    degrades to mathtext instead of failing the page.
+    """
+    tex = _load_tex_fallback()
+    sources = []
+    has_latex = True
+    for item in used_ids:
+        spec = formulas.get(item)
+        latex = _spec_latex(spec)
+        if not latex:
+            has_latex = False
+            break
+        sources.append((latex, not spec.get("inline")))
+    status = tex.toolchain_status()
+    plan = tex.select_degradation(
+        compiler_ok=True,
+        pandoc_present=shutil.which("pandoc") is not None,
+        has_latex=has_latex,
+        engine_present=status["engine"] is not None,
+        png_converter_present=status["png_converter"] is not None,
+        svg_converter_present=status["svg_converter"] is not None,
+        mathtext_present=True,
+    )
+    _write_requested_sidecars(tex, formulas, used_ids)
+    if plan["picture"] == "tex-png":
+        try:
+            blobs = [
+                tex.render_tex_png(latex, display=display, dpi=tex.DEFAULT_DPI)
+                for latex, display in sources
+            ]
+            return tex.stack_pngs(blobs)
+        except (tex.TexFallbackError, OSError, subprocess.TimeoutExpired) as exc:
+            _note_tex_degrade(used_ids, exc)
+    return render_equation_png(
+        expressions,
+        width,
+        max(height, 0.45 * len(expressions)),
+        plain,
+        strict=strict,
+        inline=inline,
+    )
+
+
 def transform_slide(xml_text, formulas, rels_text, media_stem):
     """Return slide XML, slide rels XML, and ``{part_name: png_bytes}``."""
     cache = {}
@@ -669,9 +762,8 @@ def transform_slide(xml_text, formulas, rels_text, media_stem):
             isinstance(formulas.get(item), dict) and formulas[item].get("inline")
             for item in used_ids
         )
-        png = render_equation_png(
-            expressions, width, max(height, 0.45 * len(expressions)), plain,
-            strict=strict, inline=inline,
+        png = _fallback_png(
+            formulas, used_ids, expressions, width, height, plain, strict, inline,
         )
         png_w, png_h = _png_size(png)
         xfrm = _fit_xfrm(xfrm, png_w, png_h)

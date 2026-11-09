@@ -7,6 +7,7 @@
 - 字阶写死：封面和内容页标题 32pt，正文至少 20pt、硬底 18pt，图注和图表标签至少 16pt，来源 13pt。结果页标题写这一页的主张。
 - 结构审计新增 `font_below_min`（页脚／来源带外的可见正文小于 18pt）和 `low_contrast_text`（相对白底低于 4.5:1，以及文字色 `#BFBFBF`）。两条只警告，退出码不变。
 - 公式回退图把 `\frac` 画成 `\dfrac`，PNG 透明；送给 OMML 编译器的字符串不变。短符号用 `scripts/inline_math.py` 收成可编辑小框。屏幕上不写 `x_i` 这种 ASCII 下标。
+- 公式回退在本机有 TeX 和 PNG 转换器时，改用真实 TeX 的透明 PNG（至少 300 DPI，`scripts/tex_fallback.py`）。没有 TeX 或 TeX 失败时仍用上面的 mathtext，不整页失败。可编辑 OMML 仍是主路径。pandoc 只在编译器抛错时再试。SVG 和 `.tex` 只作可选旁路，不进幻灯片。
 - 数据图可以套 `assets/presentation.mplstyle`（院色，无上边框和右边框）。
 
 ## 2026-11-07

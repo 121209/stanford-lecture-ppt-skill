@@ -2,7 +2,7 @@
 
 屏幕上的公式要能被听众读懂，并且不能露出 LaTeX 源码。`python-pptx` 在 Linux 上写不好复杂公式，所以按下面的顺序做。验收口径见 [验收](qa.md)。
 
-环境要求：内置 LaTeX 编译器使用 Python 3.10+ 的联合类型语法，不能在 Python 3.8 中运行。生成公式图片回退另需 matplotlib；完整验证还需 python-pptx 和 lxml。优先在虚拟环境中安装，具体命令见 [README](../README.md#检查工具)。
+环境要求：内置 LaTeX 编译器使用 Python 3.10+ 的联合类型语法，不能在 Python 3.8 中运行。没有 TeX 时，公式图片回退用 matplotlib；TeX 渲染成功时这张回退图不依赖 matplotlib。完整验证还需 python-pptx 和 lxml。优先在虚拟环境中安装，具体命令见 [README](../README.md#检查工具)。真实 TeX 是可选工具，单元测试不要求安装。
 
 ## 数学排版和局部修改
 
@@ -22,13 +22,37 @@
 
 | 顺序 | 做法 | LibreOffice 里怎么算通过 |
 | --- | --- | --- |
-| 1 | OMML。占位符 `{{MATH:id}}` 独占一个文本框里的一个 run，再用 `scripts/inject_omml.py` 写成 PowerPoint 原生结构：`mc:AlternateContent` → `mc:Choice Requires="a14"` → `a14:m` → `m:oMathPara` → `m:oMath`。`mc:Fallback` 是同一形状区域里的高 DPI 公式图 | LibreOffice 应显示这张回退图，而不是空白。裸 `m:oMath` 直接放进 `a:p` 通不过架构校验。包里不得残留 `{{MATH:` |
+| 1 | OMML。占位符 `{{MATH:id}}` 独占一个文本框里的一个 run，再用 `scripts/inject_omml.py` 写成 PowerPoint 原生结构：`mc:AlternateContent` → `mc:Choice Requires="a14"` → `a14:m` → `m:oMathPara` → `m:oMath`。`mc:Fallback` 是同一形状区域里的高 DPI 公式图：有 TeX 时用真实 TeX 透明 PNG，否则用 mathtext | LibreOffice 应显示这张回退图，而不是空白。裸 `m:oMath` 直接放进 `a:p` 通不过架构校验。包里不得残留 `{{MATH:` |
 | 2 | 高 DPI 数学图。LaTeX 或 mathtext 导出 PNG 或 SVG，至少 300 DPI，最好 300–600 DPI。图旁用可编辑文字写符号说明 | 这是组会在 Linux 上默认可核验的路径。预览里公式模糊，算失败 |
 | 3 | Cambria Math 或分段的可编辑数学文本。上下标用字体自身的基线。不要在屏幕上写 `x_i` 这种 ASCII | 只用于单个符号或很短的式子，而且是没有编译器时的权宜。分式、求和、积分升到 1 或 2 |
 
-LaTeX 不必再等 pandoc。`scripts/vendor/pptmaster_formula/` 是一份 MIT 编译器（ppt-master，提交 `4a68cdd`），标准库就能把式子编成结构化 OMML。求和用块级编译，上下限是 `undOvr`；外层仍由 `inject_omml.py` 包进原来的 `m:oMathPara` 和图片回退。不认识的命令直接报错，源码不会落到幻灯片上。pandoc 只在编译器抛错、并且本机真有 pandoc 时才再试一次。
+LaTeX 不必再等 pandoc。`scripts/vendor/pptmaster_formula/` 是一份 MIT 编译器（ppt-master，提交 `4a68cdd`），标准库就能把式子编成结构化 OMML。求和用块级编译，上下限是 `undOvr`；外层仍由 `inject_omml.py` 包进原来的 `m:oMathPara` 和图片回退。不认识的命令直接报错，源码不会落到幻灯片上。pandoc 只在编译器抛错、并且本机真有 pandoc 时才再试一次。这五份编译器文件保持原样，公式策略写在它们外面。
 
-有 `latex` 时，回退图用这一条字符串，matplotlib mathtext 字体是 stixsans。`\displaystyle` 这类 mathtext 画不出、去掉后符号不变的命令会先去掉。回退字符串里的 `\frac` 会改成 `\dfrac`，分式按显示样式画；送给 OMML 编译器的仍是原来的字符串，结构还是 `m:f`。剩下仍画不出时，注入失败。图按自身宽高比放进占位框，背景透明，不铺近白实心底。
+## 回退图的降级阶梯
+
+可编辑 OMML 始终先做。LibreOffice 看见的是 `mc:Fallback` 里的图，不是 Choice 里的公式。缺工具就降到下一档，不因为没装 TeX 而整页失败，也不把 LaTeX 源码写上幻灯片。
+
+1. **可编辑 OMML（始终尝试）。** 解析顺序是 `runs`，然后已有的 `omml`，然后 `latex`。`latex` 交给 vendored 编译器。编译器抛错时，只有本机有 pandoc 才再试一次。pandoc 不是图片格式，也不是主路径。
+2. **TeX 透明 PNG（引擎和转换器都在时）。** 规格里有 `latex`，并且同时找得到 TeX 引擎和 PNG 转换器时，回退图走 `scripts/tex_fallback.py`。至少 300 DPI，默认 400。引擎顺序是 `xelatex`、`lualatex`、`pdflatex`。文档类是 `standalone`（`border=2pt`），导言区是 `amsmath,amssymb,mathtools,bm` 和 `xcolor`，笔画颜色 `#222222`，和正文一致。展示公式用 `\[...\]`，短符号（`inline: true`）用 `$...$`。编译参数是 `-interaction=nonstopmode -halt-on-error -file-line-error`，不打开 `-shell-escape`。PNG 转换的顺序是 `pdftocairo -png -transp`（纸色透明），然后 ghostscript 的 `pngalpha`，然后 ImageMagick（`magick` 或 `convert`）的 `-density`、`-trim`、`+repage`。白纸底会去掉，四角透明，按图片自身比例放进占位框。这张图只进 `mc:Fallback`，不替换 `mc:Choice` 里的 OMML。TeX 自己失败时改走第 3 档，并在标准错误打一行说明。
+3. **mathtext（没有 TeX，或 TeX 失败）。** 这是降级后的第 6 轮回退，不是和 TeX 同一档。字体 stixsans。`\displaystyle` 这类 mathtext 画不出、去掉后符号不变的命令会先去掉。回退字符串里的 `\frac` 改成 `\dfrac`，分式按显示样式画；送给 OMML 编译器的仍是原来的字符串，结构还是 `m:f`。字号下限约 22pt。图透明，不铺近白实心底。`latex` 规格仍画不出时，注入失败。
+4. **编译器失败时的 pandoc。** 只发生在第 1 步抛错之后。图片仍走第 2 或第 3 步。OMML 和图片都做不到时，命令失败，屏幕上不留源码。
+
+同一形状里有多条带 `latex` 的公式时，每条单独渲染再竖向叠成一张 PNG。只要有一条没有 `latex`（只有 `runs` 或 `omml`），这一形状的回退图就用 mathtext，避免用猜出来的 TeX 源冒充原文。
+
+可选旁路，不放进 pptx：`dvisvgm --pdf --no-fonts --exact`，否则 `pdf2svg`，写出 SVG。设置环境变量 `STANFORD_FORMULA_TEX_DIR` 时，注入会在该目录留下 `{id}.tex`。`.tex` 和 SVG 都不是幻灯片里的公式，审计要的回退仍是 PNG。
+
+需要的命令：`xelatex`、`lualatex`、`pdflatex` 至少一个；`pdftocairo`、`gs`、`magick` 或 `convert` 至少一个。宏包：`standalone`、`amsmath`、`amssymb`、`mathtools`、`bm`、`xcolor`。SVG 旁路另需 `dvisvgm` 或 `pdf2svg`。例如 Debian/Ubuntu：`texlive-xetex texlive-latex-extra texlive-science poppler-utils`。没装这些时走 mathtext，测试保持绿色。
+
+## 从 nature 学到的，以及故意不学的
+
+nature-paper2ppt 本身多半是把论文图（含公式面板）裁成图片，没有 OMML 注入。高保真 TeX 资产在 nature-image2ppt 的 `formula_renderer.py`：真 TeX、`standalone`、amsmath/mathtools/bm、PDF 转至少 300 DPI 的 PNG（ImageMagick `-density`、`-trim`、`+repage`）或 SVG（`dvisvgm` / `pdf2svg`），并在资产旁边保留 `.tex`。那里的清单把公式标成 `editable: false`，视觉优先于能不能改。
+
+本仓库把这套渲染拿来提高 LibreOffice 能看见的回退图。主路径仍是可编辑 OMML。故意不学的做法：
+
+- 不把只出图、`editable: false` 当成公式主路径。
+- 不在缺 TeX 或转换器时让整页失败；按上面的阶梯降级，并在本文写明 mathtext 是降级档。
+- 不用生图模型画公式，也不在这一轮改示意图、图表或素材抠图。
+- 不把 SVG 或 `.tex` 塞进幻灯片冒充可编辑公式。页面决策里「素材分离失败就整页卡住」的门，不套到公式上。
 
 ## 禁止
 
@@ -97,7 +121,7 @@ python scripts/inline_math.py deck.pptx inline.json -o deck-inline.pptx
 python scripts/inject_omml.py deck.pptx formulas.json -o deck-math.pptx
 ```
 
-脚本不覆盖输入文件。输出里若仍有 `{{MATH:`，命令失败。需要本机有 matplotlib，用来画回退图。没有 matplotlib 时命令失败，不会把 LaTeX 源码写进幻灯片。
+脚本不覆盖输入文件。输出里若仍有 `{{MATH:`，命令失败。没有 TeX 时需要 matplotlib 画回退图；没有 matplotlib 且 TeX 也不可用时命令失败，不会把 LaTeX 源码写进幻灯片。TeX 渲染成功时，这一张回退图不经过 matplotlib。
 
 ## 高 DPI 图
 

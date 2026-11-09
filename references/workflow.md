@@ -26,7 +26,7 @@
 
 风格已明确为本skill，不再强迫选2–3套风格。使用本skill的黑红讲义体系，根据页角色换版式。
 
-默认 `editable`：用可用的演示文稿工具导入／复制版式，原生对象填充。只把真实图、照片、复杂科研图作为图片。关键公式不可用时先按 [公式](formulas.md) 尝试 OMML 或高 DPI 数学图，确有格式损失再报告，不默默换成整页图片，也不把 LaTeX 源码留在屏幕上。
+默认 `editable`：用可用的演示文稿工具导入／复制版式，原生对象填充。只把真实图、照片、复杂科研图作为图片。关键公式不可用时先按 [公式](formulas.md) 尝试 OMML。回退图优先真实 TeX 透明 PNG，没有 TeX 再用 mathtext；二者都不取代可编辑 OMML。确有格式损失再报告，不默默换成整页图片，也不把 LaTeX 源码留在屏幕上。
 
 示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go 或 TikZ 不得当成 backend 失败，也不得因此改走整页图片。
 

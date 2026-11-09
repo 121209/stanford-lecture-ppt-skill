@@ -96,7 +96,7 @@ Codex 会检测**本地技能文件**的变化；更新未显示时重启 Codex�
 
 ## 检查工具
 
-`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`chart_helpers.py` 写原生条形图。`inject_omml.py` 注入带图片回退的原生 OMML：LaTeX 由内置编译器转换，pandoc 只是备用，回退图需要 matplotlib。`inline_math.py` 把短符号（如 `d_k`）收成同一套 OMML 小框。
+`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`chart_helpers.py` 写原生条形图。`inject_omml.py` 注入带图片回退的原生 OMML：LaTeX 由内置编译器转换，pandoc 只是备用。回退图在本机有 TeX 和 PNG 转换器时用 `tex_fallback.py` 的透明高 DPI PNG，否则需要 matplotlib mathtext。`inline_math.py` 把短符号（如 `d_k`）收成同一套 OMML 小框。
 
 使用内置 LaTeX 编译器或运行完整测试时，需 **Python 3.10 或以上**；Python 3.8 不支持编译器的联合类型语法。建议在虚拟环境中安装完整测试所需依赖：
 
@@ -104,7 +104,7 @@ Codex 会检测**本地技能文件**的变化；更新未显示时重启 Codex�
 python -m pip install python-pptx matplotlib lxml
 ```
 
-LibreOffice 和 `pdftoppm` 用于可选的渲染回归测试；未安装时相关测试会跳过，不能把跳过视为渲染验收通过。
+LibreOffice 和 `pdftoppm` 用于可选的渲染回归测试；未安装时相关测试会跳过，不能把跳过视为渲染验收通过。公式的 TeX 回退同样可选：需要 `xelatex`（或 `lualatex` / `pdflatex`）以及 `pdftocairo`、`gs` 或 ImageMagick 之一。没装时注入改用 mathtext，单元测试不要求 TeX。可选 SVG 旁路用 `dvisvgm` 或 `pdf2svg`，不放进 pptx。设置 `STANFORD_FORMULA_TEX_DIR` 可在该目录留下 `.tex` 源，源码不会写进幻灯片。
 
 ```bash
 python scripts/audit_pptx.py assets/demo.pptx
