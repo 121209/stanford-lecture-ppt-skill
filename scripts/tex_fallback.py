@@ -28,6 +28,8 @@ PICTURE_RUNGS = ("tex-png", "mathtext")
 # The vendored compiler is always attempted. Pandoc runs only if it raises.
 OMML_RUNGS = ("vendor", "pandoc")
 INK = (0x22, 0x22, 0x22)
+# Shared invisible box so separately cropped inline symbols keep one baseline.
+INLINE_STRUT = r"\vphantom{\mathrm{softmax}d_{k}}"
 
 
 class TexFallbackError(RuntimeError):
@@ -191,8 +193,16 @@ def _strip_math_delimiters(tex):
     return text
 
 
-def build_latex_document(tex, *, preamble="", full_document=False, display=True):
-    """Standalone wrapper. Ink is ``#222222`` so the fallback matches the slide body."""
+def build_latex_document(
+    tex, *, preamble="", full_document=False, display=True, font_size=None
+):
+    """Standalone wrapper. Ink is ``#222222`` so the fallback matches the slide body.
+
+    Nature writes ``\\[...\\]``. On this TeX Live, standalone crops in a
+    horizontal box, so ``\\[`` never enters display math. ``varwidth`` restores
+    ``\\[`` but then clips anything wider than ``\\textwidth``. Display style
+    is therefore ``$\\displaystyle ...$``, which is the same style without the clip.
+    """
     if not isinstance(tex, str) or not tex.strip():
         raise TexFallbackError("LaTeX input is empty.")
     if full_document:
@@ -201,18 +211,26 @@ def build_latex_document(tex, *, preamble="", full_document=False, display=True)
     if not body:
         raise TexFallbackError("LaTeX input is empty.")
     if display:
-        wrapped = "\\[\n" + body + "\n\\]"
+        wrapped = "$\\displaystyle\n" + body + "\n$"
     else:
-        wrapped = "$" + body + "$"
+        wrapped = "$" + INLINE_STRUT + " " + body + "$"
     extra = preamble.strip()
     extra_line = (extra + "\n") if extra else ""
+    font_line = ""
+    if font_size is not None:
+        size = float(font_size)
+        if size < 10 or size > 72:
+            raise TexFallbackError("TeX font size must be between 10 and 72 pt")
+        font_line = "\\fontsize{%.2f}{%.2f}\\selectfont\n" % (size, size * 1.2)
     return (
         "\\documentclass[border=2pt]{standalone}\n"
+        "\\usepackage{lmodern}\n"
         "\\usepackage{amsmath,amssymb,mathtools,bm}\n"
         "\\usepackage{xcolor}\n"
         + extra_line
         + "\\begin{document}\n"
-        "\\color[HTML]{222222}\n"
+        + font_line
+        + "\\color[HTML]{222222}\n"
         + wrapped
         + "\n\\end{document}\n"
     )
@@ -368,23 +386,35 @@ def convert_pdf_to_svg(pdf, out_path, timeout):
     raise TexFallbackError("SVG output requires dvisvgm or pdf2svg.")
 
 
-def _transparent_png(raw, pad=8, dpi=DEFAULT_DPI):
-    """Knock out white paper and trim. The result is an RGBA PNG."""
-    try:
-        from PIL import Image
-    except ImportError as exc:
-        raise TexFallbackError(
-            "Pillow is required to make the TeX PNG transparent."
-        ) from exc
-    image = Image.open(io.BytesIO(raw)).convert("RGBA")
+def _pixel_rows(image):
+    if hasattr(image, "get_flattened_data"):
+        return list(image.get_flattened_data())
+    return list(image.getdata())
+
+
+def _corners_clear(image):
+    width, height = image.size
+    if width < 2 or height < 2:
+        return False
+    pixels = image.load()
+    return all(
+        pixels[x, y][3] < 8
+        for x, y in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1))
+    )
+
+
+def _knockout_white_paper(image):
+    """Opaque white scans become transparent ink. Already-clear renders skip this."""
     pixels = []
-    source = image.get_flattened_data() if hasattr(image, "get_flattened_data") else image.getdata()
-    for red, green, blue, alpha in source:
+    for red, green, blue, alpha in _pixel_rows(image):
         if alpha < 8 or (red >= 248 and green >= 248 and blue >= 248):
             pixels.append((0, 0, 0, 0))
             continue
         if alpha < 250 and max(red, green, blue) < 40:
             pixels.append((INK[0], INK[1], INK[2], alpha))
+            continue
+        if alpha >= 250 and max(red, green, blue) < 80:
+            pixels.append((red, green, blue, alpha))
             continue
         lum = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
         ink = int(round(255 - lum))
@@ -395,24 +425,49 @@ def _transparent_png(raw, pad=8, dpi=DEFAULT_DPI):
         else:
             pixels.append((INK[0], INK[1], INK[2], min(255, ink)))
     image.putdata(pixels)
-    bbox = image.getbbox()
-    if not bbox:
-        raise TexFallbackError("TeX PNG had no ink")
-    image = image.crop(bbox)
-    if pad:
-        canvas = Image.new(
-            "RGBA",
-            (image.width + pad * 2, image.height + pad * 2),
-            (0, 0, 0, 0),
-        )
-        canvas.paste(image, (pad, pad), image)
-        image = canvas
+    return image
+
+
+def _save_png(image, dpi):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", dpi=(int(dpi), int(dpi)))
     blob = buffer.getvalue()
     if len(blob) < 26 or blob[25] != 6:
         raise TexFallbackError("TeX PNG was not RGBA")
     return blob
+
+
+def _transparent_png(raw, pad=8, dpi=DEFAULT_DPI, trim=True):
+    """RGBA PNG. A clear render keeps its alpha; a white page is knocked out.
+
+    Inline callers pass ``trim=False`` so a shared strut still reserves depth.
+    Trimming would crop that invisible box and the baselines would drift.
+    """
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise TexFallbackError(
+            "Pillow is required to make the TeX PNG transparent."
+        ) from exc
+    image = Image.open(io.BytesIO(raw)).convert("RGBA")
+    if not _corners_clear(image):
+        image = _knockout_white_paper(image)
+    if trim:
+        bbox = image.getbbox()
+        if not bbox:
+            raise TexFallbackError("TeX PNG had no ink")
+        image = image.crop(bbox)
+        if pad:
+            canvas = Image.new(
+                "RGBA",
+                (image.width + pad * 2, image.height + pad * 2),
+                (0, 0, 0, 0),
+            )
+            canvas.paste(image, (pad, pad), image)
+            image = canvas
+    elif image.getbbox() is None:
+        raise TexFallbackError("TeX PNG had no ink")
+    return _save_png(image, dpi)
 
 
 def stack_pngs(blobs):
@@ -450,18 +505,24 @@ def render_tex_png(
     keep_tex=None,
     full_document=False,
     shell_escape=False,
+    font_size=None,
+    trim=True,
 ):
     """Render one formula to a transparent RGBA PNG at ``dpi`` (>= 300)."""
     dpi = _assert_dpi(dpi)
     document = build_latex_document(
-        tex, preamble=preamble, full_document=full_document, display=display
+        tex,
+        preamble=preamble,
+        full_document=full_document,
+        display=display,
+        font_size=font_size,
     )
     if keep_tex is not None:
         write_tex_sidecar(keep_tex, document)
     folder, pdf, _name = _compile_pdf(document, engine, timeout, shell_escape)
     try:
         raw, _converter = convert_pdf_to_png(pdf, dpi=dpi, timeout=timeout)
-        return _transparent_png(raw, dpi=dpi)
+        return _transparent_png(raw, dpi=dpi, trim=trim)
     finally:
         folder.cleanup()
 

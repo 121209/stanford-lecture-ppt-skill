@@ -554,12 +554,71 @@ def _fit_xfrm(xfrm, png_w, png_h):
     return fitted
 
 
+def _png_dpi(blob):
+    """DPI written into the TeX PNG, or None when the file does not say."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        image = Image.open(io.BytesIO(blob))
+    except Exception:
+        return None
+    dpi = image.info.get("dpi")
+    if isinstance(dpi, tuple) and dpi and dpi[0] and float(dpi[0]) >= 300:
+        return float(dpi[0])
+    return None
+
+
+def _place_inline_natural(xfrm, png_w, png_h, dpi):
+    """Place an inline TeX PNG at its rendered size. Do not squash it into the box.
+
+    A 0.7 in slot cannot hold ``softmax`` at 22pt. Scaling the picture down to
+    that slot makes the word unreadably small. The shape grows to the right and,
+    when needed, around the placeholder's vertical center. ``d_k``, ``\\lambda``
+    and ``softmax`` stay the same point size, so their baselines match.
+    """
+    ext = _attrs(xfrm, "a:ext")
+    off = _attrs(xfrm, "a:off")
+    try:
+        cy = int(ext.get("cy", "0"))
+        ox = int(off.get("x", "0"))
+        oy = int(off.get("y", "0"))
+    except ValueError:
+        return xfrm
+    if dpi <= 0 or png_w <= 0 or png_h <= 0 or cy <= 0:
+        return xfrm
+    new_cx = max(1, int(round(png_w / float(dpi) * EMU_IN)))
+    new_cy = max(1, int(round(png_h / float(dpi) * EMU_IN)))
+    new_y = oy + (cy - new_cy) // 2
+    if new_y < 0:
+        new_y = 0
+    placed = _set_xml_attr(xfrm, "a:ext", "cx", new_cx)
+    placed = _set_xml_attr(placed, "a:ext", "cy", new_cy)
+    placed = _set_xml_attr(placed, "a:off", "x", ox)
+    placed = _set_xml_attr(placed, "a:off", "y", new_y)
+    return placed
+
+
+def _replace_shape_xfrm(shape, xfrm):
+    updated, count = re.subn(
+        r"<a:xfrm\b[^>]*>.*?</a:xfrm>",
+        lambda _match: xfrm,
+        shape,
+        count=1,
+        flags=re.DOTALL,
+    )
+    if count != 1:
+        return shape
+    return updated
+
+
 def _fallback_shape(xfrm, rel_id, shape_id):
     return (
         '<p:sp><p:nvSpPr><p:cNvPr id="%d" name="Equation fallback"/>'
         "<p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>%s"
         '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-        '<a:blipFill><a:blip r:embed="%s"/></a:blipFill>'
+        '<a:blipFill><a:blip r:embed="%s"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>'
         "<a:ln><a:noFill/></a:ln>"
         "</p:spPr></p:sp>"
     ) % (shape_id, xfrm, rel_id)
@@ -700,10 +759,23 @@ def _fallback_png(formulas, used_ids, expressions, width, height, plain, strict,
     _write_requested_sidecars(tex, formulas, used_ids)
     if plan["picture"] == "tex-png":
         try:
-            blobs = [
-                tex.render_tex_png(latex, display=display, dpi=tex.DEFAULT_DPI)
-                for latex, display in sources
-            ]
+            blobs = []
+            for latex, as_display in sources:
+                if as_display:
+                    size = _fallback_fontsize(height, len(sources), latex, inline=False)
+                    dpi = 600
+                else:
+                    size = 22
+                    dpi = tex.DEFAULT_DPI
+                blobs.append(
+                    tex.render_tex_png(
+                        latex,
+                        display=as_display,
+                        dpi=dpi,
+                        font_size=size,
+                        trim=as_display,
+                    )
+                )
             return tex.stack_pngs(blobs)
         except (tex.TexFallbackError, OSError, subprocess.TimeoutExpired) as exc:
             _note_tex_degrade(used_ids, exc)
@@ -766,7 +838,12 @@ def transform_slide(xml_text, formulas, rels_text, media_stem):
             formulas, used_ids, expressions, width, height, plain, strict, inline,
         )
         png_w, png_h = _png_size(png)
-        xfrm = _fit_xfrm(xfrm, png_w, png_h)
+        tex_dpi = _png_dpi(png)
+        if inline and tex_dpi:
+            xfrm = _place_inline_natural(xfrm, png_w, png_h, tex_dpi)
+            choice = _replace_shape_xfrm(choice, xfrm)
+        else:
+            xfrm = _fit_xfrm(xfrm, png_w, png_h)
         rel_id = _fresh_rid(rels)
         slug = "-".join(used_ids)
         part = "ppt/media/%s-%s.png" % (media_stem, slug)

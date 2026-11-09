@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -163,26 +164,32 @@ class TexFallbackTests(unittest.TestCase):
         try:
             self.assertIsNone(tex.find_engine())
             empty = tex.toolchain_status()
+            self.assertFalse(empty["tex_png"])
+            self.assertFalse(empty["tex_svg"])
+            with self.assertRaises(tex.TexFallbackError) as caught:
+                tex.require_engine()
+            self.assertIn("xelatex", str(caught.exception))
         finally:
             tex.shutil.which = original
-        self.assertFalse(empty["tex_png"])
-        self.assertFalse(empty["tex_svg"])
-        with self.assertRaises(tex.TexFallbackError) as caught:
-            tex.require_engine()
-        self.assertIn("xelatex", str(caught.exception))
 
     def test_document_wrapper_matches_nature_and_keeps_shell_escape_off(self):
         tex = load("tex_fallback")
-        document = tex.build_latex_document(r"\frac{a}{b}", display=True)
+        document = tex.build_latex_document(r"\frac{a}{b}", display=True, font_size=28)
         self.assertIn(r"\documentclass[border=2pt]{standalone}", document)
+        self.assertNotIn("varwidth", document)
+        self.assertIn(r"\usepackage{lmodern}", document)
         self.assertIn(r"\usepackage{amsmath,amssymb,mathtools,bm}", document)
         self.assertIn(r"\usepackage{xcolor}", document)
         self.assertIn(r"\color[HTML]{222222}", document)
-        self.assertIn("\\[\n\\frac{a}{b}\n\\]", document)
+        self.assertIn(r"\fontsize{28.00}", document)
+        self.assertIn("$\\displaystyle\n\\frac{a}{b}\n$", document)
+        self.assertNotIn("\\[", document)
         self.assertNotIn("editable", document)
-        inline = tex.build_latex_document(r"$d_k$", display=False)
-        self.assertIn("$d_k$", inline)
+        inline = tex.build_latex_document(r"$d_k$", display=False, font_size=22)
+        self.assertIn("d_k", inline)
+        self.assertIn(tex.INLINE_STRUT, inline)
         self.assertNotIn("\\[", inline)
+        self.assertTrue(inline.strip().endswith("\\end{document}"))
         command = tex.latex_command("xelatex", "formula.tex")
         self.assertEqual(
             command,
@@ -245,6 +252,34 @@ class TexFallbackTests(unittest.TestCase):
         flat = kept.get_flattened_data() if hasattr(kept, "get_flattened_data") else kept.getdata()
         alphas = [pixel[3] for pixel in flat if pixel[3]]
         self.assertEqual(alphas, [80])
+        clear = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+        clear.putpixel((4, 4), (34, 34, 34, 255))
+        raw_clear = BytesIO()
+        clear.save(raw_clear, format="PNG")
+        preserved = Image.open(
+            BytesIO(tex._transparent_png(raw_clear.getvalue(), pad=0, trim=False))
+        )
+        self.assertEqual(preserved.getpixel((4, 4)), (34, 34, 34, 255))
+        self.assertEqual(preserved.getpixel((0, 0))[3], 0)
+
+    def test_inline_natural_size_widens_a_narrow_softmax_box(self):
+        inject = load("inject_omml")
+        # 0.70 in by 0.42 in, the narrow slot from the visual deck.
+        xfrm = (
+            '<a:xfrm><a:off x="7589520" y="3657600"/>'
+            '<a:ext cx="640080" cy="384048"/></a:xfrm>'
+        )
+        # 22pt softmax is wider than 0.70 in. 900 px at 400 dpi is 2.25 in.
+        placed = inject._place_inline_natural(xfrm, 900, 180, 400)
+        ext = dict(re.findall(r'([A-Za-z0-9:]+)="([^"]*)"', placed))
+        self.assertGreater(int(ext["cx"]), 640080)
+        self.assertGreater(int(ext["cy"]), 0)
+        off_y = int(ext["y"])
+        self.assertLess(off_y, 3657600)
+        self.assertGreater(off_y, 0)
+        fitted = inject._fit_xfrm(xfrm, 900, 180)
+        fitted_ext = dict(re.findall(r'([A-Za-z0-9:]+)="([^"]*)"', fitted))
+        self.assertLessEqual(int(fitted_ext["cx"]), 640080)
 
     def test_stack_pngs_leaves_a_single_blob_unchanged(self):
         tex = load("tex_fallback")
@@ -263,9 +298,25 @@ class TexFallbackTests(unittest.TestCase):
             with self.assertRaises(tex.TexFallbackError):
                 tex.render_tex_png(r"\lambda", display=False, dpi=300)
         else:
-            blob = tex.render_tex_png(r"\lambda", display=False, dpi=max(300, tex.MIN_DPI))
+            blob = tex.render_tex_png(
+                r"\lambda", display=False, dpi=max(300, tex.MIN_DPI), font_size=22, trim=False,
+            )
             self.assertEqual(blob[:8], b"\x89PNG\r\n\x1a\n")
             self.assertEqual(blob[25], 6)
+            from PIL import Image
+            image = Image.open(BytesIO(blob)).convert("RGBA")
+            self.assertEqual(image.getpixel((0, 0))[3], 0)
+            rows = image.get_flattened_data() if hasattr(image, "get_flattened_data") else image.getdata()
+            solid = [
+                pixel for pixel in rows
+                if pixel[3] == 255 and pixel[0] < 80 and pixel[1] < 80 and pixel[2] < 80
+            ]
+            self.assertTrue(solid, "TeX ink should stay opaque, not washed out")
+            display = tex.render_tex_png(
+                r"\sum_{i=1}^{n} i", display=True, dpi=300, font_size=22, trim=True,
+            )
+            self.assertEqual(display[25], 6)
+            self.assertGreater(len(display), 500)
         if not status["tex_svg"]:
             with tempfile.TemporaryDirectory() as folder:
                 with self.assertRaises(tex.TexFallbackError) as caught:
@@ -333,7 +384,7 @@ class TexFallbackTests(unittest.TestCase):
                 report = test_helpers.audit.audit(dest)
         finally:
             self._restore(tex, inject, originals)
-        self.assertEqual(calls, [(r"\frac{QK^{\top}}{\sqrt{d_k}}", True, tex.DEFAULT_DPI)])
+        self.assertEqual(calls, [(r"\frac{QK^{\top}}{\sqrt{d_k}}", True, 600)])
         self.assertGreaterEqual(calls[0][2], 300)
         self.assertIn(b"<m:f>", slide)
         self.assertIn(b"mc:AlternateContent", slide)
