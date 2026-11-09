@@ -96,7 +96,7 @@ Codex 会检测**本地技能文件**的变化；更新未显示时重启 Codex�
 
 ## 检查工具
 
-`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`chart_helpers.py` 写原生条形图。`inject_omml.py` 注入带图片回退的原生 OMML：LaTeX 由内置编译器转换，pandoc 只是备用。回退图在本机有 TeX 和 PNG 转换器时用 `tex_fallback.py` 的透明高 DPI PNG，否则需要 matplotlib mathtext。`inline_math.py` 把短符号（如 `d_k`）收成同一套 OMML 小框。
+`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`chart_helpers.py` 写原生条形图。`inject_omml.py` 注入带图片回退的原生 OMML：LaTeX 由内置编译器转换，pandoc 只是备用。回退图在本机有 TeX 和 PNG 转换器时用 `tex_fallback.py` 的透明高 DPI PNG，否则需要 matplotlib mathtext。`inline_math.py` 把短符号（如 `d_k`）收成同一套 OMML 小框。用户明确要求推导动画时，`embed_motion.py` 把已经渲染好的 MP4 嵌进 PPTX；ManimGX 本身是可选的，没有它测试仍然通过。做法见 [运动讲解](references/motion.md)。
 
 使用内置 LaTeX 编译器或运行完整测试时，需 **Python 3.10 或以上**；Python 3.8 不支持编译器的联合类型语法。建议在虚拟环境中安装完整测试所需依赖：
 
@@ -121,7 +121,7 @@ python -m unittest discover -s tests -v
 SKILL.md                 技能入口与边界
 agents/openai.yaml       Codex界面描述
 references/              风格、流程、内容、验收与来源
-scripts/                 只读审计、制作状态、原生示意图与 OMML 注入
+scripts/                 只读审计、制作状态、原生示意图、OMML 注入、可选的 MP4 嵌入
 assets/demo.pptx         匿名可编辑示例（第 7 页为图优先示例）
 assets/diagram-samples/  三页匿名示意图与公式样张
 assets/previews/         示例与样张的渲染预览
