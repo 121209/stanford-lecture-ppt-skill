@@ -29,7 +29,7 @@ description: "制作、迁移或局部修改斯坦福 CS329/CS329Z 讲义风格�
 
 - 制作前读 [风格与版式](references/style.md) 和 [制作流程](references/workflow.md)。
 - 论文、读图、公式和讲稿读 [内容与证据](references/content.md)。
-- 算法、架构和多步流程读 [示意图](references/diagrams.md)。公式页读 [公式](references/formulas.md)。
+- 算法、架构和多步流程读 [示意图](references/diagrams.md)。公式页读 [公式](references/formulas.md)。用户明确要求的推导动画或三维直觉读 [运动讲解](references/motion.md)，不作为默认路径。
 - 导出前读 [验收](references/qa.md)。
 - 查看 [流程来源](references/provenance.md) 了解与codex-ppt的继承和差异。
 - `assets/demo.pptx` 及 `assets/previews/` 只供布局与编辑性参考。不要把示意数值、标题或读后感带入用户的新报告。
@@ -47,7 +47,7 @@ description: "制作、迁移或局部修改斯坦福 CS329/CS329Z 讲义风格�
    - 渲染后自检：逐页数屏幕字数并记入 `record --qa-note`（如“p3: 36词”），超限页不得 record。
    - 内容带下半部：四格流程图或同类中等高度版式若在内容带上半部结束，下半部不得整段留空。用一行结论、一句读图说明，或第二行小示意图补上。禁止为此缩小字号，或把更多正文塞进屏幕。没有原图的结果页必须放原生示意图块，或单独做一页明确标「缺图」的缺口页，不能只用文字条。结构审计对大片空白的下半内容带只记 warning（`empty_lower_content_band`），退出码不变，不能代替逐页看版式。
    - 图优先：算法、架构、多步流程页必须是 `native_diagram`，或版心明确写「缺图」。禁止纯文字算法页。决策表、节点上限和引擎顺序见 [示意图](references/diagrams.md)。优先级是可编辑原生形状，然后论文原图，然后手绘矢量，然后仅在用户明示时的 AI 概念草稿，最后才是缺图页。
-   - 公式：屏幕禁止出现 LaTeX 源码（`\frac`、`\sum`、`\lambda`、`^{`、`_{`）。优先带高 DPI 图片回退的原生 OMML，不把只可看的图片公式当成主路径。LaTeX 规格由内置编译器转成结构化 OMML，不依赖 pandoc。回退图在本机有 TeX 引擎和 PNG 转换器时用真实 TeX 的透明 PNG（至少 300 DPI）；没有则用 mathtext。缺 TeX 不整页失败。Linux 上也可以直接用高 DPI 数学图，符号说明仍用可编辑文字。从 nature 的 TeX 渲染学来的阶梯，以及故意不采用的「只出图」做法，见 [公式](references/formulas.md)。
+   - 公式：屏幕禁止出现 LaTeX 源码（`\frac`、`\sum`、`\lambda`、`^{`、`_{`）。优先带高 DPI 图片回退的原生 OMML，不把只可看的图片公式当成主路径。LaTeX 规格由内置编译器转成结构化 OMML，不依赖 pandoc。回退图在本机有 TeX 引擎和 PNG 转换器时用真实 TeX 的透明 PNG（至少 300 DPI）；没有则用 mathtext。缺 TeX 不整页失败。Linux 上也可以直接用高 DPI 数学图，符号说明仍用可编辑文字。从 nature 的 TeX 渲染学来的阶梯，以及故意不采用的「只出图」做法，见 [公式](references/formulas.md)。用户明确要求的公式变形或几何动画可以另嵌 ManimGX 的 MP4，见 [运动讲解](references/motion.md)；这段影片不取代 OMML。
    - 屏幕上的数学字母不要写成 ASCII 下标（`x_i`、`d_k`）。短符号用短 LaTeX，收成可编辑 OMML 小框；整段公式仍用独立 `{{MATH:}}`。没有编译器时才退回 Unicode 数学字母，源码不能留在屏幕上。
 3. 文字、关键公式、表格、逻辑图默认可选中修改；原论文复杂证据图保留清晰度和出处，不生成相似数据图代替原图。关键公式的可编辑路径以 [公式](references/formulas.md) 为准，不能把 ASCII 源码当成已经可编辑。
 4. 屏幕保留结论及必要条件；解释、推导、局限、例子与过渡写入同页演讲者备注。制作任务须交付实际文件，不止修改建议。
@@ -73,5 +73,7 @@ description: "制作、迁移或局部修改斯坦福 CS329/CS329Z 讲义风格�
 Linux 组会默认用 python-pptx 画原生形状和连接线（`scripts/diagram_helpers.py`）。Mermaid 落到原生形状是可选增强。环境里没有 officecli、Go、TikZ 或生图 API 时，仍走形状路径，不改成整页 PNG。只有用户明确要求生图、AI 示意图或 graphical abstract 时才允许概念草稿；草稿不是实验证据。
 
 `scripts/audit_pptx.py` 与 `scripts/run_state.py` 只依赖 Python 标准库，不生成 PPT。`scripts/diagram_helpers.py` 另需 python-pptx，用来写形状。`scripts/chart_helpers.py` 写原生条形图。`scripts/inject_omml.py` 把 `{{MATH:id}}` 换成带图片回退的原生 OMML：LaTeX 走内置编译器，pandoc 只是编译失败时的备用。回退图优先 `scripts/tex_fallback.py` 的真实 TeX 透明 PNG（可选；引擎 `xelatex` / `lualatex` / `pdflatex`，再加 `pdftocairo`、`gs` 或 ImageMagick），否则用 matplotlib mathtext。缺 TeX 不整页失败。完整制作仍需具备原生 PPTX 生成与渲染能力的工具。未安装 codex-ppt 也可使用本 skill；不把其整页图片组装器用于可编辑分支。
+
+用户明确要求推导动画、公式变形或三维直觉时，按 [运动讲解](references/motion.md) 用 ManimGX：先 `manimgx inspect`，再 `manimgx render` 得到 MP4，然后用 `scripts/embed_motion.py` 嵌进 PPTX。ManimGX 不导出 PPTX，也不取代 OMML 或原生形状。它需要 Python 3.13 或 3.14。`embed_motion.py --check` 在没有 `manimgx` 时仍退出 0；这时保留可编辑公式或形状，并在备注说明动画没有渲染。不要自动安装。
 
 不默许外发私人材料、使用付费API、读取密钥或发布内容。能力或素材确实缺失时报告受影响页和限制，不私自替造证据或降低编辑性。

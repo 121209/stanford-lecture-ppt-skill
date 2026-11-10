@@ -14,7 +14,7 @@
 
 先创建 `outline.draft.md` 或聊天中的简短大纲。每页列出：目的、一条核心信息、2–4个短要点、版式角色、`visual_plan`、所需原图（路径＋角色＋出处）、读后收获、备注讲解重点。把必须保留的图精确映射到页，不让执行者自行找“类似图”。
 
-`visual_plan.kind` 取 `native_diagram`、`paper_figure`、`table`、`equation`、`gap`、`text_ok` 之一。`text_ok` 只用于封面、过渡和纯讨论收获。方法段和结果段不要标 `text_ok`。整稿没有视觉的页，目标不超过 30%。`engine` 取 `python-pptx-shapes`、`mermaid-native`、`extract` 或 `none`。算法、架构和多步流程页的 `must_diagram` 为 true，除非这一页是写明原因的 `gap`。
+`visual_plan.kind` 取 `native_diagram`、`paper_figure`、`table`、`equation`、`gap`、`text_ok` 之一。`text_ok` 只用于封面、过渡和纯讨论收获。方法段和结果段不要标 `text_ok`。整稿没有视觉的页，目标不超过 30%。`engine` 取 `python-pptx-shapes`、`mermaid-native`、`extract` 或 `none`。算法、架构和多步流程页的 `must_diagram` 为 true，除非这一页是写明原因的 `gap`。用户明确要求推导动画或三维直觉时，可以另写 `kind: motion`、`engine: manimgx`；这一页不替换公式页或原生示意图，做法见 [运动讲解](motion.md)。
 
 大纲、图映射和样张策略先在内部具体化。只有仍存在影响范围或风格的待选项时，才合并向用户确认；当前明确的制作指令已构成授权时直接继续，详细逐页清单可作为大纲依据。不要因用户未额外说“直接做”而停工。
 
@@ -28,7 +28,7 @@
 
 默认 `editable`：用可用的演示文稿工具导入／复制版式，原生对象填充。只把真实图、照片、复杂科研图作为图片。关键公式不可用时先按 [公式](formulas.md) 尝试 OMML。回退图优先真实 TeX 透明 PNG，没有 TeX 再用 mathtext；二者都不取代可编辑 OMML。确有格式损失再报告，不默默换成整页图片，也不把 LaTeX 源码留在屏幕上。
 
-示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go 或 TikZ 不得当成 backend 失败，也不得因此改走整页图片。
+示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go、TikZ 或 ManimGX 不得当成 backend 失败，也不得因此改走整页图片。ManimGX 只在用户明确要求运动讲解时探测（`scripts/embed_motion.py --check`），没有它就保持 OMML 和原生形状。
 
 只有用户明确接受整页图时选 `image`：先核对内置生图工具是否可调用，再确定图像后端，不能凭模型名称猜测能力。需要付费API／外部服务时取得相应授权；不为本地默认路径索要API key。固定后端与样张方法，后续不偷偷更换。证据图仍须原样嵌入保真，不请求模型仿制数据；无法保真时暂停该页并说明。生成图只作为概念草稿，见 [示意图](diagrams.md)。
 
