@@ -8,7 +8,7 @@
 
 确认或合理推断：新稿／修订、阅读情况／单篇精读／实验进展、听众、时长、页数、交付位置、需要保留的页与图。用户已经给出详细指令时直接落实，不重复提问。缺少不影响当前工作的材料先说明，再用可用材料继续；缺少承载核心结论的证据时不能编造。
 
-创建任务私有 `.build/`；原件只读。新稿建议8–12页只是起点，不覆盖明确页数。用户自己的署名、日期和已完成状态均由本次材料确定。
+创建任务私有 `.build/`；原件只读。要改已有 PPTX 时，用 `scripts/safe_edit.py` 把原件复制成工作副本并记录 sha256。默认不覆盖。用户本次明确允许覆盖原文件时才加 `--in-place`。写回前再对一下这份 hash；源文件变了就另存，不盖住新版本。新稿建议8–12页只是起点，不覆盖明确页数。用户自己的署名、日期和已完成状态均由本次材料确定。
 
 ## 2. 大纲与素材映射
 
@@ -28,7 +28,9 @@
 
 默认 `editable`：用可用的演示文稿工具导入／复制版式，原生对象填充。只把真实图、照片、复杂科研图作为图片。关键公式不可用时先按 [公式](formulas.md) 尝试 OMML。回退图优先真实 TeX 透明 PNG，没有 TeX 再用 mathtext；二者都不取代可编辑 OMML。确有格式损失再报告，不默默换成整页图片，也不把 LaTeX 源码留在屏幕上。
 
-示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go、TikZ 或 ManimGX 不得当成 backend 失败，也不得因此改走整页图片。ManimGX 只在用户明确要求运动讲解时探测（`scripts/embed_motion.py --check`），没有它就保持 OMML 和原生形状。
+示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go、TikZ、PowerPoint、COM、WPS 或 ManimGX 不得当成 backend 失败，也不得因此改走整页图片。ManimGX 只在用户明确要求运动讲解时探测（`scripts/embed_motion.py --check`），没有它就保持 OMML 和原生形状。
+
+先跑 `python scripts/doctor.py`。Python 3.10+ 和 python-pptx 是这道门的必需项。TeX、pdftocairo、LibreOffice、ManimGX 缺失只记在报告里，退出码仍为 0：公式图片退回 mathtext（或本机已有的其他 PNG 转换器）、渲染检查跳过、运动片段不渲染。需要留下环境记录时用 `python scripts/doctor.py --write <私有目录>/runtime-profile.json`。这份记录不含密钥，也不把某台作者机器的路径写成硬性要求。
 
 只有用户明确接受整页图时选 `image`：先核对内置生图工具是否可调用，再确定图像后端，不能凭模型名称猜测能力。需要付费API／外部服务时取得相应授权；不为本地默认路径索要API key。固定后端与样张方法，后续不偷偷更换。证据图仍须原样嵌入保真，不请求模型仿制数据；无法保真时暂停该页并说明。生成图只作为概念草稿，见 [示意图](diagrams.md)。
 

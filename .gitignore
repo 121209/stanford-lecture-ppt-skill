@@ -1,5 +1,6 @@
 .build/
 .codex-build/
+runtime-profile.json
 .codex-finalizer/
 __pycache__/
 *.pyc

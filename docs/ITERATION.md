@@ -101,6 +101,7 @@ PR 使用 [检查清单](../.github/PULL_REQUEST_TEMPLATE.md)：
 改了 `scripts/` 或 `tests/`：
 
 ```bash
+python scripts/doctor.py
 python -m unittest discover tests
 ```
 
