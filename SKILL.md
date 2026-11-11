@@ -30,6 +30,7 @@ description: "制作、迁移或局部修改斯坦福 CS329/CS329Z 讲义风格�
 - 制作前读 [风格与版式](references/style.md) 和 [制作流程](references/workflow.md)。
 - 论文、读图、公式和讲稿读 [内容与证据](references/content.md)。
 - 算法、架构和多步流程读 [示意图](references/diagrams.md)。公式页读 [公式](references/formulas.md)。用户明确要求的推导动画或三维直觉读 [运动讲解](references/motion.md)，不作为默认路径。
+- 封面、原生表格、文字双栏、页脚页码、图注、定义框和节分隔读 [版式构件](references/layouts.md)。单击出现只在用户要求时使用，默认不加。
 - 导出前读 [验收](references/qa.md)。
 - 查看 [流程来源](references/provenance.md) 了解与codex-ppt的继承和差异。
 - `assets/demo.pptx` 及 `assets/previews/` 只供布局与编辑性参考。不要把示意数值、标题或读后感带入用户的新报告。
@@ -72,7 +73,9 @@ description: "制作、迁移或局部修改斯坦福 CS329/CS329Z 讲义风格�
 
 Linux 组会默认用 python-pptx 画原生形状和连接线（`scripts/diagram_helpers.py`）。Mermaid 落到原生形状是可选增强。环境里没有 officecli、Go、TikZ 或生图 API 时，仍走形状路径，不改成整页 PNG。只有用户明确要求生图、AI 示意图或 graphical abstract 时才允许概念草稿；草稿不是实验证据。
 
-`scripts/audit_pptx.py` 与 `scripts/run_state.py` 只依赖 Python 标准库，不生成 PPT。`scripts/diagram_helpers.py` 另需 python-pptx，用来写形状。`scripts/chart_helpers.py` 写原生条形图。`scripts/inject_omml.py` 把 `{{MATH:id}}` 换成带图片回退的原生 OMML：LaTeX 走内置编译器，pandoc 只是编译失败时的备用。回退图优先 `scripts/tex_fallback.py` 的真实 TeX 透明 PNG（可选；引擎 `xelatex` / `lualatex` / `pdflatex`，再加 `pdftocairo`、`gs` 或 ImageMagick），否则用 matplotlib mathtext。缺 TeX 不整页失败。完整制作仍需具备原生 PPTX 生成与渲染能力的工具。未安装 codex-ppt 也可使用本 skill；不把其整页图片组装器用于可编辑分支。
+`scripts/audit_pptx.py` 与 `scripts/run_state.py` 只依赖 Python 标准库，不生成 PPT。`scripts/diagram_helpers.py` 另需 python-pptx，用来写形状。`scripts/chart_helpers.py` 写原生条形图，以及调用方自备数字的折线和散点。`scripts/layout_helpers.py` 写封面、原生表格、文字双栏、页脚页码、图加图注、定义框和节分隔，都是可编辑对象。`scripts/inject_omml.py` 把 `{{MATH:id}}` 换成带图片回退的原生 OMML：LaTeX 走内置编译器，pandoc 只是编译失败时的备用。回退图优先 `scripts/tex_fallback.py` 的真实 TeX 透明 PNG（可选；引擎 `xelatex` / `lualatex` / `pdflatex`，再加 `pdftocairo`、`gs` 或 ImageMagick），否则用 matplotlib mathtext。缺 TeX 不整页失败。完整制作仍需具备原生 PPTX 生成与渲染能力的工具。未安装 codex-ppt 也可使用本 skill；不把其整页图片组装器用于可编辑分支。
+
+用户要求单击后出现或逐条进入时，用 `scripts/appear.py` 写原生进入动画（瞬间出现，或 0.5–0.7 秒淡入）。不调用就没有这段动画。它不组合对象，也不取代 OMML、原生形状或 ManimGX。
 
 用户明确要求推导动画、公式变形或三维直觉时，按 [运动讲解](references/motion.md) 用 ManimGX：先 `manimgx inspect`，再 `manimgx render` 得到 MP4，然后用 `scripts/embed_motion.py` 嵌进 PPTX。ManimGX 不导出 PPTX，也不取代 OMML 或原生形状。它需要 Python 3.13 或 3.14。`embed_motion.py --check` 在没有 `manimgx` 时仍退出 0；这时保留可编辑公式或形状，并在备注说明动画没有渲染。不要自动安装。
 
