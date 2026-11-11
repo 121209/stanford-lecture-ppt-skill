@@ -2,6 +2,12 @@
 
 合入 `main` 之后，若制作行为有变化，在这里追加一节。格式见 [迭代闭环](docs/ITERATION.md)。
 
+## 2026-11-11
+
+- 新增 `scripts/doctor.py`。检查 Python 3.10+ 与 python-pptx；TeX、pdftocairo、LibreOffice、ManimGX 可选，缺失仍退出 0，并写明降级。`--write` 写出不含密钥、不含作者机器路径要求的 runtime profile。不把 PowerPoint、COM、WPS 或付费 API 当作必需项。
+- 打开已有 PPTX 默认用 `scripts/safe_edit.py` 另存工作副本并记录源文件 sha256。只有明确传入 `--in-place` 才覆盖原文件。本来就写到新路径的助手保持原样，示例生成不会改写 `assets/demo.pptx`。
+- 未点名的既有形状必须保留。`tests/test_preserve_existing.py` 用 `PREEXISTING_SENTINEL` 在临时目录里核对会往页上加内容的助手。没有 LibreOffice 时跳过渲染。
+
 ## 2026-11-10
 
 - 风格里写过、脚本里没有的日常对象补成函数：原生表格、论文封面、文字双栏、页脚页码、图加可编辑图注、细线定义框、一行节分隔。见 `scripts/layout_helpers.py` 与 [版式构件](references/layouts.md)。公式仍是 OMML，算法和架构仍是原生形状。
