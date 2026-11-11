@@ -164,9 +164,11 @@ class HelperTests(unittest.TestCase):
         self.assertFalse(report['slides_without_body_notes'])
         self.assertEqual(report['slides'][3]['native_chart_count'],1)
         self.assertTrue(all(s['native_text_shape_count']>2 for s in report['slides']))
-        self.assertTrue(report['slides'][0]['onscreen_word_cap_exempt'])
-        self.assertEqual(report['slides_over_word_cap'], [3, 5])
+        self.assertEqual(report['slides_over_word_cap'], [])
+        self.assertTrue(all(s['onscreen_word_cap'] is None for s in report['slides']))
+        self.assertTrue(all(not s['onscreen_word_cap_exempt'] for s in report['slides']))
         self.assertTrue(all('onscreen_word_count' in s for s in report['slides']))
+        self.assertIn('No word cap is applied', report['claim_boundary'])
         self.assertEqual(report['slides_with_empty_lower_content_band'], [])
         self.assertEqual(report['slides_missing_diagram'], [])
         self.assertEqual(report['slides_with_raw_latex'], [])
@@ -179,42 +181,74 @@ class HelperTests(unittest.TestCase):
     def test_word_count_cjk_ratio(self):
         self.assertEqual(audit.word_count('中'*80), 40)
         self.assertEqual(audit.word_count('中'*81), 40.5)
+        self.assertEqual(audit.word_count('中'*112), 56)
+        self.assertEqual(audit.word_count('中'*113), 56.5)
         self.assertEqual(audit.word_count('mean squared error'), 3)
         self.assertEqual(audit.word_count('误差 MSE'), 2)
+        self.assertIsNone(audit._word_cap(None))
 
     def test_word_cap_flags_overflow_not_cover_or_source_lines(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'words.pptx'
             footer_y = 6200000
             write_deck(path, [
-                [{'text': '中'*90, 'sz': 2200}],
+                [{'text': '中'*130, 'sz': 2200}],
                 [
-                    {'text': '中'*80, 'sz': 2200},
+                    {'text': '中'*112, 'sz': 2200},
                     {'text': '02', 'sz': 1300, 'y': footer_y},
                     {'text': '来源：示意数据，不代表论文结果。'+'补'*40, 'sz': 1400, 'y': 1400000},
                     {'text': '页底说明不计入屏幕字数。'+'注'*30, 'sz': 1500, 'y': footer_y},
                     {'text': '来源：下半部占位，不计入屏幕字数。', 'sz': 1400, 'y': 4500000},
                 ],
                 [{'text': '中'*81, 'sz': 2200}],
+                [{'text': '中'*113, 'sz': 2200}],
                 [
-                    {'text': '中'*90, 'sz': 1400, 'y': 1600000},
+                    {'text': '中'*120, 'sz': 1400, 'y': 1600000},
                     {'text': '来源：下半部占位，不计入屏幕字数。', 'sz': 1400, 'y': 4500000},
                 ],
             ])
             report = audit.audit(path)
-        self.assertEqual([s['onscreen_word_count'] for s in report['slides']], [45, 40, 40.5, 45])
-        self.assertEqual(report['slides_over_word_cap'], [3, 4])
-        self.assertTrue(report['slides'][0]['onscreen_word_cap_exempt'])
+            tight = audit.audit(path, word_cap=40)
+            with self.assertRaises(ValueError):
+                audit.audit(path, word_cap=0)
+            saved = sys.argv
+            try:
+                sys.argv = ['audit_pptx.py', str(path)]
+                plain = StringIO()
+                with redirect_stdout(plain):
+                    plain_code = audit.main()
+                sys.argv = ['audit_pptx.py', str(path), '--word-cap', '40']
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    code = audit.main()
+            finally:
+                sys.argv = saved
+        self.assertEqual(plain_code, 0)
+        self.assertEqual(code, 0)
+        plain_payload = json.loads(plain.getvalue())
+        self.assertEqual(plain_payload['slides_over_word_cap'], [])
+        self.assertTrue(all(s['onscreen_word_cap'] is None for s in plain_payload['slides']))
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload['slides'][1]['onscreen_word_cap'], 40)
+        self.assertIn(2, payload['slides_over_word_cap'])
+        self.assertNotIn(1, payload['slides_over_word_cap'])
+        self.assertEqual([s['onscreen_word_count'] for s in report['slides']], [65, 56, 40.5, 56.5, 60])
+        self.assertEqual(report['slides_over_word_cap'], [])
+        self.assertTrue(all(s['onscreen_word_cap'] is None for s in report['slides']))
+        self.assertIn('No word cap is applied', report['claim_boundary'])
+        self.assertFalse(report['slides'][0]['onscreen_word_cap_exempt'])
+        self.assertFalse(any(
+            item['code'] == 'onscreen_text_over_word_cap' for item in report['slides'][3]['warnings']
+        ))
         self.assertEqual(
-            [item['code'] for item in report['slides'][2]['warnings']],
-            ['onscreen_text_over_word_cap'],
+            [item['code'] for item in report['slides'][4]['warnings']],
+            ['font_below_min'],
         )
-        self.assertEqual(
-            [item['code'] for item in report['slides'][3]['warnings']],
-            ['onscreen_text_over_word_cap', 'font_below_min'],
-        )
-        self.assertFalse(report['slides'][1]['warnings'])
         self.assertEqual(report['slides_with_empty_lower_content_band'], [])
+        self.assertEqual(tight['slides_over_word_cap'], [2, 3, 4, 5])
+        self.assertEqual(tight['slides'][2]['onscreen_word_cap'], 40)
+        self.assertTrue(tight['slides'][0]['onscreen_word_cap_exempt'])
+        self.assertIn('optional word cap of 40', tight['claim_boundary'])
 
     def test_empty_lower_content_band_warns_without_changing_exit_code(self):
         with tempfile.TemporaryDirectory() as folder:

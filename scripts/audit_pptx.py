@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read-only OOXML inventory. This is not a visual or scientific QA verdict.
 
-Also estimates per-slide on-screen word counts against a 40-word cap (cover exempt),
-and warns when the lower half of the content band is largely empty. A content slide
+Also estimates per-slide on-screen word counts. A word-cap warning is off unless
+--word-cap is passed. It warns when the lower half of the content band is largely empty. A content slide
 whose title names an algorithm, method, architecture, or pipeline, and that has no
 diagram, picture, table, chart, or 「缺图」 marker, is a warning. So is raw LaTeX,
 and OMML that is not PowerPoint's a14 choice plus a picture fallback. Visible body
@@ -31,7 +31,6 @@ NS = {
     "a14": "http://schemas.microsoft.com/office/drawing/2010/main",
 }
 EMU_PER_PX = 9525
-WORD_CAP = 40
 # Explicit run size is in hundredths of a point. 15pt source lines are excluded.
 SOURCE_LINE_MAX_HUNDREDTHS_PT = 1500
 # Body hard floor. Caption-sized 16pt text is still below this and may warn.
@@ -557,7 +556,29 @@ def notes_body(zf, slide_part):
     return part, "\n".join(texts)
 
 
-def audit(path):
+def _word_cap(value):
+    """None leaves the check off. A passed value must be a positive number."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("word cap must be a positive number")
+    if value <= 0 or value != value or value == float("inf"):
+        raise ValueError("word cap must be a positive number")
+    return value
+
+
+def audit(path, word_cap=None):
+    word_cap = _word_cap(word_cap)
+    if word_cap is None:
+        cap_shown = None
+        cap_sentence = (
+            "No word cap is applied. Pass --word-cap to record onscreen_text_over_word_cap. "
+        )
+    else:
+        cap_shown = format_word_count(word_cap)
+        cap_sentence = (
+            "An optional word cap of %s is in effect; page 1 is exempt. " % cap_shown
+        )
     source = Path(path).resolve(strict=True)
     result = {
         "schema_version": 1,
@@ -572,7 +593,8 @@ def audit(path):
             "It skips slide-number placeholders, digit-only page numbers, and ≤15pt source lines "
             "(a source marker, or a ≤15pt paragraph in the bottom 15% of the slide). "
             "Other ≤15pt body text still counts, so shrinking the font does not hide overflow. "
-            "Page 1 is exempt as the cover. Runs without an explicit size are counted. "
+            + cap_sentence
+            + "Runs without an explicit size are counted. "
             "This is not a line-break, bullet-limit, or visual-density verdict. "
             "empty_lower_content_band is a warning only and does not change the process exit code. "
             "The content band runs from 20% to 85% of slide height (body below the title, above the "
@@ -688,13 +710,13 @@ def audit(path):
                 pale_colors.extend(found_pale)
             shown = format_word_count(words)
             record["onscreen_word_count"] = shown
-            record["onscreen_word_cap"] = WORD_CAP
-            record["onscreen_word_cap_exempt"] = page == 1
-            if page != 1 and words > WORD_CAP:
+            record["onscreen_word_cap"] = cap_shown
+            record["onscreen_word_cap_exempt"] = word_cap is not None and page == 1
+            if word_cap is not None and page != 1 and words > word_cap:
                 record["warnings"].append({
                     "code": "onscreen_text_over_word_cap",
                     "word_count": shown,
-                    "cap": WORD_CAP,
+                    "cap": cap_shown,
                 })
             band_boxes = content_band_boxes(tree)
             if page != 1 and lower_content_band_is_empty(band_boxes, sh):
@@ -795,9 +817,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pptx", help="Existing source PPTX; never modified")
     parser.add_argument("--json", dest="json_path", help="Optional new report file (refuses overwrite)")
+    parser.add_argument(
+        "--word-cap",
+        type=float,
+        default=None,
+        help="Optional on-screen word cap. Off unless passed. 2 CJK characters = 1 word. Page 1 is exempt when the check runs.",
+    )
     args = parser.parse_args()
     try:
-        report = audit(args.pptx)
+        report = audit(args.pptx, word_cap=args.word_cap)
         encoded = json.dumps(report, ensure_ascii=False, indent=2)
         if args.json_path:
             target = Path(args.json_path).resolve()

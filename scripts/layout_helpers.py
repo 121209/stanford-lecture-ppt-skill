@@ -45,6 +45,8 @@ ROW_H = int(round(0.50 * EMU_IN))
 MAX_TABLE_COLS = 6
 MAX_TABLE_ROWS = 5
 CELL_WORD_CAP = 6
+# One 20pt line in a half-width column. This is a line-fit limit, not a slide cap.
+POINT_WORD_CAP = 10
 
 
 def emu(inches):
@@ -115,9 +117,12 @@ def _line(text, limit, label):
 
 
 def _budget(parts, limit, label):
+    """Combined length for one sparse block, so the type stays on one line."""
     total = sum(_words(part) for part in parts)
     if total > limit:
-        raise ValueError("%s is %.1f words; the screen cap is %d" % (label, total, limit))
+        raise ValueError("%s is %.1f words; keep it to %d so the type stays one line" % (
+            label, total, limit,
+        ))
     return total
 
 
@@ -291,7 +296,7 @@ def add_cover(slide, title, presenter, date, kicker=None, authors=None, venue=No
 
     Authors and venue are optional for a talk that is not a paper. They are
     body text in the content area, not a 13pt footer. The caller should put
-    this on slide 1, which is the word-cap exemption.
+    this on slide 1.
     """
     _require_widescreen(slide)
     title = _line(title, 24, "title")
@@ -388,8 +393,7 @@ def add_two_column(slide, title, left_title, left_points, right_title, right_poi
     for label, points in (("left", left_points), ("right", right_points)):
         if isinstance(points, (str, bytes)) or not isinstance(points, (list, tuple)) or not 1 <= len(points) <= 3:
             raise ValueError(label + " column needs 1 to 3 points")
-        columns.append([_line(point, 8, label + " point") for point in points])
-    _budget([title, left_title, right_title, conclusion] + columns[0] + columns[1], 40, "two-column slide")
+        columns.append([_line(point, POINT_WORD_CAP, label + " point") for point in points])
     add_title(slide, title)
     api = _pptx()
     colors = _colors(api)
@@ -486,6 +490,8 @@ def add_table(slide, headers, rows, region, conclusion=None, caption=None, sourc
     Row height is fixed. A short table does not stretch to fill ``region``.
     When the table and its caption stay in the upper content band, ``conclusion``
     is required and is placed in the lower band. Pass the numbers you were given.
+    Cells stay short so 20pt fits one line. There is no whole-slide word cap;
+    split the slide when the table no longer fits at that size.
     """
     _require_widescreen(slide)
     api = _pptx()
@@ -521,12 +527,6 @@ def add_table(slide, headers, rows, region, conclusion=None, caption=None, sourc
             caption is not None and _overlaps_y(caption_y, caption_h, READ_Y, READ_H)
         ):
             raise ValueError("conclusion overlaps the table; keep the table in the upper band")
-    pieces = header_text + [cell for row in body for cell in row]
-    if caption:
-        pieces.append(caption)
-    if conclusion:
-        pieces.append(conclusion)
-    _budget(pieces, 32, "table")
     frame = slide.shapes.add_table(
         1 + len(body), len(header_text),
         api["Emu"](x), api["Emu"](y), api["Emu"](w), api["Emu"](table_h),

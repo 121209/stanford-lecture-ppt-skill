@@ -129,6 +129,6 @@ python scripts/diagram_helpers.py --samples assets/diagram-samples/figure-first.
 
 - 禁止纯文字的算法页、架构页、多步流程页。
 - 禁止用生成图冒充论文原图或实验结果。
-- 禁止为了填满下半部而缩小字号，或把备注搬回屏幕。
+- 禁止为了填满下半部而缩小字号，或把备注里的讲解段落搬回屏幕。这一页主题需要的关键数字、对照和 panel 读解写在屏幕上。
 - 禁止把 Unicode 堆成假公式，或在屏幕留下 LaTeX 源码。公式另见 [公式](formulas.md)。
 - 禁止用 ManimGX 的影片代替原生流程图、架构图或可编辑公式。影片只在用户明确要求运动讲解时追加。
