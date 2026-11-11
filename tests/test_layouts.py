@@ -323,6 +323,33 @@ class LayoutHelperTests(unittest.TestCase):
                 conclusion="一句结论放在下半部。",
             )
         self.assertIn("screen cap is 56", str(caught.exception))
+        # A 56-word table plus a 14-word title is 70 on screen. The title counts.
+        prs, slide = self._deck()
+        layout.add_title(slide, "甲" * 28)
+        layout.add_footer(slide, source="来源：" + "甲" * 40, page=3)
+        six = "一二三四五六七八九十一二"
+        with self.assertRaises(ValueError) as caught:
+            layout.add_table(
+                slide,
+                [six, six, six],
+                [[six, six, six]],
+                (layout.emu(0.7), layout.emu(1.8), layout.emu(11.5), layout.emu(2.2)),
+                caption="一二三四五六七八九十一二三四五六",
+                conclusion="甲" * 24,
+            )
+        self.assertIn("70.0 words", str(caught.exception))
+        self.assertIn("screen cap is 56", str(caught.exception))
+        prs, slide = self._deck()
+        layout.add_title(slide, "甲" * 28)
+        layout.add_footer(slide, source="来源：" + "甲" * 40, page=4)
+        layout.add_table(
+            slide,
+            [six, six, six],
+            [[1, 2, 3]],
+            (layout.emu(0.7), layout.emu(1.8), layout.emu(11.5), layout.emu(2.2)),
+            caption="一二三四五六七八九十一二三四五六七八",
+            conclusion="甲" * 24,
+        )
 
     def test_sample_deck_stays_inside_the_lecture_rules(self):
         with tempfile.TemporaryDirectory() as folder:

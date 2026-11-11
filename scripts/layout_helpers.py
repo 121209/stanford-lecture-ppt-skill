@@ -34,6 +34,9 @@ SOURCE_MARK = re.compile(
     r"(来源\s*[:：]|出处\s*[:：]|图源\s*[:：]|资料来源|引自|Source\s*:|DOI\b|doi\s*:|arXiv|https?://)",
     re.IGNORECASE,
 )
+PAGE_NUMBER_TEXT = re.compile(r"\d{1,3}")
+# Same exclusion as scripts/audit_pptx.py: ≤15pt source lines and page numbers.
+SOURCE_LINE_MAX_PT = 15
 CONTENT_TOP_RATIO = 0.20
 FOOTER_TOP_RATIO = 0.85
 MIN_EXTENT = int(round(28 * 9525))
@@ -118,11 +121,63 @@ def _line(text, limit, label):
     return cleaned
 
 
-def _budget(parts, limit, label):
-    total = sum(_words(part) for part in parts)
+def _budget(parts, limit, label, already=0.0):
+    total = already + sum(_words(part) for part in parts)
     if total > limit:
         raise ValueError("%s is %.1f words; the screen cap is %d" % (label, total, limit))
     return total
+
+
+def _paragraph_screen_words(paragraph, in_footer):
+    """Words the audit would count. Drop page numbers and ≤15pt source lines."""
+    runs = list(paragraph.runs)
+    visible = "".join(run.text or "" for run in runs).strip()
+    if not visible:
+        return 0.0
+    sizes = []
+    for run in runs:
+        size = run.font.size
+        sizes.append(None if size is None else size.pt)
+    small = bool(sizes) and all(sz is not None and sz <= SOURCE_LINE_MAX_PT for sz in sizes)
+    if PAGE_NUMBER_TEXT.fullmatch(visible) and (small or in_footer or all(sz is None for sz in sizes)):
+        return 0.0
+    if small and (in_footer or SOURCE_MARK.search(visible)):
+        return 0.0
+    return _words(visible)
+
+
+def _frame_words(frame, in_footer):
+    return sum(_paragraph_screen_words(paragraph, in_footer) for paragraph in frame.paragraphs)
+
+
+def _shape_screen_words(shape):
+    top = getattr(shape, "top", None)
+    in_footer = top is not None and int(top) >= int(SLIDE_H * FOOTER_TOP_RATIO)
+    if getattr(shape, "has_table", False):
+        total = 0.0
+        for row in shape.table.rows:
+            for cell in row.cells:
+                total += _frame_words(cell.text_frame, in_footer)
+        return total
+    if getattr(shape, "has_text_frame", False):
+        return _frame_words(shape.text_frame, in_footer)
+    return 0.0
+
+
+def _existing_screen_words(slide):
+    """On-screen words already on the slide, using the audit's exclusions."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    def walk(shapes):
+        total = 0.0
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                total += walk(shape.shapes)
+            else:
+                total += _shape_screen_words(shape)
+        return total
+
+    return walk(slide.shapes)
 
 
 def _strip_style(shape, api):
@@ -490,6 +545,8 @@ def add_table(slide, headers, rows, region, conclusion=None, caption=None, sourc
     Row height is fixed. A short table does not stretch to fill ``region``.
     When the table and its caption stay in the upper content band, ``conclusion``
     is required and is placed in the lower band. Pass the numbers you were given.
+    The 56-word budget includes text already on the slide, such as the title.
+    Page numbers and ≤15pt source lines are not counted. Add the title first.
     """
     _require_widescreen(slide)
     api = _pptx()
@@ -530,7 +587,7 @@ def add_table(slide, headers, rows, region, conclusion=None, caption=None, sourc
         pieces.append(caption)
     if conclusion:
         pieces.append(conclusion)
-    _budget(pieces, SLIDE_WORD_CAP, "table")
+    _budget(pieces, SLIDE_WORD_CAP, "table", already=_existing_screen_words(slide))
     frame = slide.shapes.add_table(
         1 + len(body), len(header_text),
         api["Emu"](x), api["Emu"](y), api["Emu"](w), api["Emu"](table_h),
