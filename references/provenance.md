@@ -28,7 +28,8 @@
 | [PlutoLei/paperbanana-skill](https://github.com/PlutoLei/paperbanana-skill) | `editable` 失败即停，禁止静默退回整页 image 还声称可编辑 |
 | [mermaid2pptx](https://github.com/serendipitynz/mermaid2pptx) 与 [pptx-diagram](https://github.com/thititongumpun/skills) | flowchart / sequence 可以落成可编辑的形状和连接线。组会默认用 python-pptx 手摆同一类节点表 |
 | [nature-figure](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-figure) | AI 生图仅在用户明示时使用；产出是概念草稿，不是数据图；架构优先手绘矢量 |
-| [nature-paper2ppt](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-paper2ppt) | 材料里有图时，结果页不做纯文字；裁图保留轴、图例、色条和 panel 标号。论文公式面板的裁图不是本仓库的公式主路径 |
+| [nature-paper2ppt](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-paper2ppt) | 材料里有图时，结果页不做纯文字；裁图保留轴、图例、色条和 panel 标号。屏幕密度按它的短句和结果页标注换算，见 [屏幕密度](density.md)。不采用它的 12–16pt 正文和 7–9pt 图注。论文公式面板的裁图不是本仓库的公式主路径 |
+| [cell-ppt](https://github.com/yrui-cmd/cell_figure_ppt) 与 [cell-ppt-edited](https://github.com/yrui-cmd/Cell/tree/main/plugins/cell-ppt-edited) | 图上的短标注留在对应对象旁边，各自一条。这两个技能没有整页字数上限，也没有样张。不接入付费接口、COM 或结束语。见 [屏幕密度](density.md) |
 | [nature-image2ppt](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-image2ppt) 的 `formula_renderer.py` | 真 TeX（`xelatex` / `lualatex` / `pdflatex`）加 `standalone`、amsmath/mathtools/bm，PDF 转高 DPI PNG 或 SVG，并保留 `.tex`。本仓库只把这套渲染用作 OMML 的图片回退。不把公式标成 `editable: false`，也不在缺 TeX 时整页失败 |
 | [academa-labs/manimgx](https://github.com/academa-labs/manimgx) | 可选的运动讲解：Manim 风格场景渲染成 MP4，再嵌进 PPTX。不把它的影片当作公式或示意图的主路径。命令以它的文档为准，见 [运动讲解](motion.md) |
 

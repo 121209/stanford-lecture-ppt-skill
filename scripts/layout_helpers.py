@@ -45,6 +45,10 @@ ROW_H = int(round(0.50 * EMU_IN))
 MAX_TABLE_COLS = 6
 MAX_TABLE_ROWS = 5
 CELL_WORD_CAP = 6
+# Same on-screen cap as scripts/audit_pptx.py. See references/density.md.
+SLIDE_WORD_CAP = 56
+# One 20pt line in a half-width column: nature-paper2ppt's 8–10 English words.
+POINT_WORD_CAP = 10
 
 
 def emu(inches):
@@ -388,8 +392,8 @@ def add_two_column(slide, title, left_title, left_points, right_title, right_poi
     for label, points in (("left", left_points), ("right", right_points)):
         if isinstance(points, (str, bytes)) or not isinstance(points, (list, tuple)) or not 1 <= len(points) <= 3:
             raise ValueError(label + " column needs 1 to 3 points")
-        columns.append([_line(point, 8, label + " point") for point in points])
-    _budget([title, left_title, right_title, conclusion] + columns[0] + columns[1], 40, "two-column slide")
+        columns.append([_line(point, POINT_WORD_CAP, label + " point") for point in points])
+    _budget([title, left_title, right_title, conclusion] + columns[0] + columns[1], SLIDE_WORD_CAP, "two-column slide")
     add_title(slide, title)
     api = _pptx()
     colors = _colors(api)
@@ -526,7 +530,7 @@ def add_table(slide, headers, rows, region, conclusion=None, caption=None, sourc
         pieces.append(caption)
     if conclusion:
         pieces.append(conclusion)
-    _budget(pieces, 32, "table")
+    _budget(pieces, SLIDE_WORD_CAP, "table")
     frame = slide.shapes.add_table(
         1 + len(body), len(header_text),
         api["Emu"](x), api["Emu"](y), api["Emu"](w), api["Emu"](table_h),

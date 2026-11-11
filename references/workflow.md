@@ -12,7 +12,7 @@
 
 ## 2. 大纲与素材映射
 
-先创建 `outline.draft.md` 或聊天中的简短大纲。每页列出：目的、一条核心信息、2–4个短要点、版式角色、`visual_plan`、所需原图（路径＋角色＋出处）、读后收获、备注讲解重点。把必须保留的图精确映射到页，不让执行者自行找“类似图”。
+先创建 `outline.draft.md` 或聊天中的简短大纲。每页列出：目的、一条核心信息、屏幕上的 2–3 条短句（每条约 18 个汉字或 10 个英文词；结果页改为最多 2 个数字／对照标注加一句读解）、版式角色、`visual_plan`、所需原图（路径＋角色＋出处）、读后收获、备注里的讲解顺序。整页屏幕文字不超过 56 词，见 [屏幕密度](density.md)。把必须保留的图精确映射到页，不让执行者自行找“类似图”。
 
 `visual_plan.kind` 取 `native_diagram`、`paper_figure`、`table`、`equation`、`gap`、`text_ok` 之一。`text_ok` 只用于封面、过渡和纯讨论收获。方法段和结果段不要标 `text_ok`。整稿没有视觉的页，目标不超过 30%。`engine` 取 `python-pptx-shapes`、`mermaid-native`、`extract` 或 `none`。算法、架构和多步流程页的 `must_diagram` 为 true，除非这一页是写明原因的 `gap`。用户明确要求推导动画或三维直觉时，可以另写 `kind: motion`、`engine: manimgx`；这一页不替换公式页或原生示意图，做法见 [运动讲解](motion.md)。
 
@@ -69,7 +69,7 @@ python scripts/run_state.py gate --project <project> --name sample --basis "用�
     "layout_intent": "为何选择这个版式",
     "visual_plan": {"kind": "native_diagram", "engine": "python-pptx-shapes", "must_diagram": true},
     "local_context": "本页所需定义和与上下页的关系，不能只写‘承接上文’",
-    "notes_outline": "解释顺序、必要限定及口述过渡",
+    "notes_outline": "讲解顺序和口述过渡；关键数字已在 key_points，不放在这里",
     "source_assets": [{"path": "assets/figure.png", "role": "evidence", "locator": "论文Figure 2", "fidelity": "保留轴、图例和数值"}]
   }]
 }

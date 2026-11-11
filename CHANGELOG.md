@@ -4,6 +4,7 @@
 
 ## 2026-11-11
 
+- 屏幕字数上限从每页 40 词改为 56 词（中文仍按 2 字 = 1 词，封面、页码和 ≤15pt 来源行不计）。56 由 nature-paper2ppt 的「一行标题 + 最多 3 条短句 + 一句 24 字读解」换算，见 [屏幕密度](references/density.md)。结果页把关键数字、对照和一句读解放在屏幕上；备注改写讲解。字号硬底、配色、公式、示意图和内容带下半部不变。`audit_pptx.py` 的默认上限是 56，`--word-cap` 可改。cell-ppt 没有整页字数，只借用「短标注留在对象旁边」。
 - 新增 `scripts/doctor.py`。检查 Python 3.10+ 与 python-pptx；TeX、pdftocairo、LibreOffice、ManimGX 可选，缺失仍退出 0，并写明降级。`--write` 写出不含密钥、不含作者机器路径要求的 runtime profile。不把 PowerPoint、COM、WPS 或付费 API 当作必需项。
 - 打开已有 PPTX 默认用 `scripts/safe_edit.py` 另存工作副本并记录源文件 sha256。只有明确传入 `--in-place` 才覆盖原文件。本来就写到新路径的助手保持原样，示例生成不会改写 `assets/demo.pptx`。
 - 未点名的既有形状必须保留。`tests/test_preserve_existing.py` 用 `PREEXISTING_SENTINEL` 在临时目录里核对会往页上加内容的助手。没有 LibreOffice 时跳过渲染。

@@ -275,6 +275,55 @@ class LayoutHelperTests(unittest.TestCase):
             self.assertIn('filter="fade"', text)
             self.assertIn('dur="600"', text)
 
+    def test_slide_budget_accepts_the_band_between_40_and_56(self):
+        self.assertEqual(layout.SLIDE_WORD_CAP, audit.WORD_CAP)
+        self.assertEqual(layout.SLIDE_WORD_CAP, 56)
+        self.assertEqual(layout.POINT_WORD_CAP, 10)
+        prs, slide = self._deck()
+        # 46 words: over the old 40-word page cap, inside 56.
+        layout.add_two_column(
+            slide,
+            "一二三四五六七八九十一二",
+            "一二三四五六七八",
+            ["一二三四五六七八"] * 3,
+            "一二三四五六七八",
+            ["一二三四五六七八"] * 3,
+            "一二三四五六七八九十一二三四五六",
+        )
+        wide = "一二" * 6
+        with self.assertRaises(ValueError) as caught:
+            layout.add_two_column(
+                slide,
+                "甲" * 28,
+                "甲" * 16,
+                [wide] * 3,
+                "甲" * 16,
+                [wide] * 3,
+                "甲" * 32,
+            )
+        self.assertIn("screen cap is 56", str(caught.exception))
+        prs, slide = self._deck()
+        label = "甲乙丙丁戊己甲乙"
+        layout.add_title(slide, "两组示意整数")
+        layout.add_table(
+            slide,
+            [label, label, label],
+            [[label, label, 2], [label, label, 4]],
+            (layout.emu(0.7), layout.emu(1.8), layout.emu(10.8), layout.emu(2.2)),
+            caption="甲乙丙丁戊己甲乙丙丁",
+            conclusion="甲乙丙丁戊己甲乙丙丁戊己",
+        )
+        cell = "一二三四五六七八九十一二"
+        with self.assertRaises(ValueError) as caught:
+            layout.add_table(
+                slide,
+                [cell] * 6,
+                [[cell] * 6, [cell] * 6],
+                (layout.emu(0.7), layout.emu(1.8), layout.emu(11.5), layout.emu(2.2)),
+                conclusion="一句结论放在下半部。",
+            )
+        self.assertIn("screen cap is 56", str(caught.exception))
+
     def test_sample_deck_stays_inside_the_lecture_rules(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "basics.pptx"
