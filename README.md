@@ -91,7 +91,7 @@ Codex 会检测**本地技能文件**的变化；更新未显示时重启 Codex�
 - 明确区分论文结论、个人收获和待验证想法，不编造日期、已完成工作或实验结果。
 - 关键文字、公式、表格和解释流程默认可编辑；原论文复杂证据图允许保留图片。
 - 原图保留坐标、色条、图例、单位、条件和来源，不让生图模型仿制实验数据。
-- 屏幕放结论、最多 2 个数字或对照标注，以及一句短读解。除封面外每页不超过 56 词（中文 2 字 = 1 词）。备注写讲解，不把这些事实藏进备注。见 [屏幕密度](references/density.md)。
+- 屏幕放这一页主题需要的结论、关键数字、对照和 panel 读解。不设每页词数上限。装不下且会低于字号硬底或溢出时拆页。备注写讲解，不把这些事实藏进备注。见 [屏幕密度](references/density.md)。
 - 不额外附加未要求的PDF、拆散讲稿或素材包。
 
 ## 检查工具
@@ -117,7 +117,7 @@ python scripts/run_state.py --help
 python -m unittest discover -s tests -v
 ```
 
-`audit_pptx.py` 按实际页序检查对象、备注、外部关系、越界、大图线索、屏幕字数（默认每页 56 词，封面不计，可用 `--word-cap` 改）、内容带下半部、标题是否点明了缺图的方法或架构页，OMML 有没有图片回退，以及屏幕上有没有 LaTeX 源码。后几项是警告，不改变退出码。`run_state.py` 记录确认门、逐页派发、素材／预览 hash 和检查状态。完整用法见 [制作流程](references/workflow.md)、[示意图](references/diagrams.md) 和 [公式](references/formulas.md)。
+`audit_pptx.py` 按实际页序检查对象、备注、外部关系、越界、大图线索、屏幕字数（只计数，默认不警告；传入 `--word-cap N` 才按词数警告，封面不计）、内容带下半部、标题是否点明了缺图的方法或架构页，OMML 有没有图片回退，以及屏幕上有没有 LaTeX 源码。后几项是警告，不改变退出码。`run_state.py` 记录确认门、逐页派发、素材／预览 hash 和检查状态。完整用法见 [制作流程](references/workflow.md)、[示意图](references/diagrams.md) 和 [公式](references/formulas.md)。
 
 ## 文件结构
 

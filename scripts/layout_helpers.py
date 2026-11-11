@@ -34,9 +34,6 @@ SOURCE_MARK = re.compile(
     r"(来源\s*[:：]|出处\s*[:：]|图源\s*[:：]|资料来源|引自|Source\s*:|DOI\b|doi\s*:|arXiv|https?://)",
     re.IGNORECASE,
 )
-PAGE_NUMBER_TEXT = re.compile(r"\d{1,3}")
-# Same exclusion as scripts/audit_pptx.py: ≤15pt source lines and page numbers.
-SOURCE_LINE_MAX_PT = 15
 CONTENT_TOP_RATIO = 0.20
 FOOTER_TOP_RATIO = 0.85
 MIN_EXTENT = int(round(28 * 9525))
@@ -48,9 +45,7 @@ ROW_H = int(round(0.50 * EMU_IN))
 MAX_TABLE_COLS = 6
 MAX_TABLE_ROWS = 5
 CELL_WORD_CAP = 6
-# Same on-screen cap as scripts/audit_pptx.py. See references/density.md.
-SLIDE_WORD_CAP = 56
-# One 20pt line in a half-width column: nature-paper2ppt's 8–10 English words.
+# One 20pt line in a half-width column. This is a line-fit limit, not a slide cap.
 POINT_WORD_CAP = 10
 
 
@@ -121,63 +116,14 @@ def _line(text, limit, label):
     return cleaned
 
 
-def _budget(parts, limit, label, already=0.0):
-    total = already + sum(_words(part) for part in parts)
+def _budget(parts, limit, label):
+    """Combined length for one sparse block, so the type stays on one line."""
+    total = sum(_words(part) for part in parts)
     if total > limit:
-        raise ValueError("%s is %.1f words; the screen cap is %d" % (label, total, limit))
+        raise ValueError("%s is %.1f words; keep it to %d so the type stays one line" % (
+            label, total, limit,
+        ))
     return total
-
-
-def _paragraph_screen_words(paragraph, in_footer):
-    """Words the audit would count. Drop page numbers and ≤15pt source lines."""
-    runs = list(paragraph.runs)
-    visible = "".join(run.text or "" for run in runs).strip()
-    if not visible:
-        return 0.0
-    sizes = []
-    for run in runs:
-        size = run.font.size
-        sizes.append(None if size is None else size.pt)
-    small = bool(sizes) and all(sz is not None and sz <= SOURCE_LINE_MAX_PT for sz in sizes)
-    if PAGE_NUMBER_TEXT.fullmatch(visible) and (small or in_footer or all(sz is None for sz in sizes)):
-        return 0.0
-    if small and (in_footer or SOURCE_MARK.search(visible)):
-        return 0.0
-    return _words(visible)
-
-
-def _frame_words(frame, in_footer):
-    return sum(_paragraph_screen_words(paragraph, in_footer) for paragraph in frame.paragraphs)
-
-
-def _shape_screen_words(shape):
-    top = getattr(shape, "top", None)
-    in_footer = top is not None and int(top) >= int(SLIDE_H * FOOTER_TOP_RATIO)
-    if getattr(shape, "has_table", False):
-        total = 0.0
-        for row in shape.table.rows:
-            for cell in row.cells:
-                total += _frame_words(cell.text_frame, in_footer)
-        return total
-    if getattr(shape, "has_text_frame", False):
-        return _frame_words(shape.text_frame, in_footer)
-    return 0.0
-
-
-def _existing_screen_words(slide):
-    """On-screen words already on the slide, using the audit's exclusions."""
-    from pptx.enum.shapes import MSO_SHAPE_TYPE
-
-    def walk(shapes):
-        total = 0.0
-        for shape in shapes:
-            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                total += walk(shape.shapes)
-            else:
-                total += _shape_screen_words(shape)
-        return total
-
-    return walk(slide.shapes)
 
 
 def _strip_style(shape, api):
@@ -350,7 +296,7 @@ def add_cover(slide, title, presenter, date, kicker=None, authors=None, venue=No
 
     Authors and venue are optional for a talk that is not a paper. They are
     body text in the content area, not a 13pt footer. The caller should put
-    this on slide 1, which is the word-cap exemption.
+    this on slide 1.
     """
     _require_widescreen(slide)
     title = _line(title, 24, "title")
@@ -448,7 +394,6 @@ def add_two_column(slide, title, left_title, left_points, right_title, right_poi
         if isinstance(points, (str, bytes)) or not isinstance(points, (list, tuple)) or not 1 <= len(points) <= 3:
             raise ValueError(label + " column needs 1 to 3 points")
         columns.append([_line(point, POINT_WORD_CAP, label + " point") for point in points])
-    _budget([title, left_title, right_title, conclusion] + columns[0] + columns[1], SLIDE_WORD_CAP, "two-column slide")
     add_title(slide, title)
     api = _pptx()
     colors = _colors(api)
@@ -545,8 +490,8 @@ def add_table(slide, headers, rows, region, conclusion=None, caption=None, sourc
     Row height is fixed. A short table does not stretch to fill ``region``.
     When the table and its caption stay in the upper content band, ``conclusion``
     is required and is placed in the lower band. Pass the numbers you were given.
-    The 56-word budget includes text already on the slide, such as the title.
-    Page numbers and ≤15pt source lines are not counted. Add the title first.
+    Cells stay short so 20pt fits one line. There is no whole-slide word cap;
+    split the slide when the table no longer fits at that size.
     """
     _require_widescreen(slide)
     api = _pptx()
@@ -582,12 +527,6 @@ def add_table(slide, headers, rows, region, conclusion=None, caption=None, sourc
             caption is not None and _overlaps_y(caption_y, caption_h, READ_Y, READ_H)
         ):
             raise ValueError("conclusion overlaps the table; keep the table in the upper band")
-    pieces = header_text + [cell for row in body for cell in row]
-    if caption:
-        pieces.append(caption)
-    if conclusion:
-        pieces.append(conclusion)
-    _budget(pieces, SLIDE_WORD_CAP, "table", already=_existing_screen_words(slide))
     frame = slide.shapes.add_table(
         1 + len(body), len(header_text),
         api["Emu"](x), api["Emu"](y), api["Emu"](w), api["Emu"](table_h),

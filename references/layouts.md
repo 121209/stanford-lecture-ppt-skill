@@ -44,13 +44,13 @@ python scripts/layout_helpers.py --samples assets/layout-samples/basics.pptx
 
 `region` 是 EMU 的 `(x, y, w, h)`。表是原生 `a:tbl`，表头和单元格都能改。行高按 20pt 固定，不会把表拉高去填满 `region`。表和表题都在上半部、又没给 `conclusion` 时，函数直接失败。
 
-单元格保持短句，大约 6 词以内，方便 20pt 一行放下。关键数字留在单元格里。先写标题，再调用 `add_table`：整页预算会把已经写在页上的标题算进去，再加单元格、表题和那一句结论，合计不超过 56 词。页码和 ≤15pt 来源行不计。超过一行的说明放进备注，不要把字号降下去。最多 6 列、5 行数据。数字由调用方传入。
+单元格保持短句，大约 6 词以内，方便 20pt 一行放下。关键数字留在单元格里。没有整页词数上限。超过一行的说明如果会把字号压下去，就拆页或放进备注里的讲解，不要把字号降下去，也不要把关键数字移出单元格。最多 6 列、5 行数据。数字由调用方传入。
 
 ## 文字双栏
 
 `add_two_column(slide, title, left_title, left_points, right_title, right_points, conclusion, source=None, page=None)`
 
-左右各 1–3 条，每条最多 10 词，这样 20pt 在半栏里仍是一行。整页连标题和结论不超过 56 词。左栏是论文工作，右栏是笔记时，结论要写明右栏不是论文已证。这不是 `diagram_helpers.py` 的 `columns`：那边是架构节点，这边是文字。
+左右各 1–3 条，每条最多 10 词，这样 20pt 在半栏里仍是一行。比较的内容多于这个时拆成两页，不缩字。左栏是论文工作，右栏是笔记时，结论要写明右栏不是论文已证。这不是 `diagram_helpers.py` 的 `columns`：那边是架构节点，这边是文字。
 
 ## 页脚
 
@@ -62,7 +62,7 @@ python scripts/layout_helpers.py --samples assets/layout-samples/basics.pptx
 
 `add_picture_caption(slide, image, region, caption)`
 
-`image` 是路径或 PNG 字节。图注是 20pt 的一行。关键数字或对照需要另写时，用单独的 20pt 文本框放在图旁，最多 2 条，计入本页 56 词，不写进备注。图如果还在上半部，图注会挪到下半部，充当那一句读图说明。论文原图可以这样嵌。不要用这张图代替原生表、原生图或 OMML。
+`image` 是路径或 PNG 字节。图注是 20pt 的一行。关键数字、对照和 panel 读解需要另写时，用单独的 20pt 文本框放在图旁，不写进备注。放不下或挡住图时拆页，不缩字。图如果还在上半部，图注会挪到下半部，充当那一句读图说明。论文原图可以这样嵌。不要用这张图代替原生表、原生图或 OMML。
 
 ## 定义框
 

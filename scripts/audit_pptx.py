@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read-only OOXML inventory. This is not a visual or scientific QA verdict.
 
-Also estimates per-slide on-screen word counts against a 56-word cap (cover exempt),
-and warns when the lower half of the content band is largely empty. A content slide
+Also estimates per-slide on-screen word counts. A word-cap warning is off unless
+--word-cap is passed. It warns when the lower half of the content band is largely empty. A content slide
 whose title names an algorithm, method, architecture, or pipeline, and that has no
 diagram, picture, table, chart, or 「缺图」 marker, is a warning. So is raw LaTeX,
 and OMML that is not PowerPoint's a14 choice plus a picture fallback. Visible body
@@ -31,10 +31,6 @@ NS = {
     "a14": "http://schemas.microsoft.com/office/drawing/2010/main",
 }
 EMU_PER_PX = 9525
-# Content-slide cap. Cover is exempt. 2 CJK characters = 1 word.
-# 56 = one 32pt title line (~14 words) + 3 short lines at 10 words + one 24-CJK reading.
-# Derivation and sources: references/density.md. Override with audit(path, word_cap=...) or --word-cap.
-WORD_CAP = 56
 # Explicit run size is in hundredths of a point. 15pt source lines are excluded.
 SOURCE_LINE_MAX_HUNDREDTHS_PT = 1500
 # Body hard floor. Caption-sized 16pt text is still below this and may warn.
@@ -561,9 +557,9 @@ def notes_body(zf, slide_part):
 
 
 def _word_cap(value):
-    """Default is WORD_CAP. A caller may pass a positive number; the check still warns."""
+    """None leaves the check off. A passed value must be a positive number."""
     if value is None:
-        value = WORD_CAP
+        return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("word cap must be a positive number")
     if value <= 0 or value != value or value == float("inf"):
@@ -573,7 +569,16 @@ def _word_cap(value):
 
 def audit(path, word_cap=None):
     word_cap = _word_cap(word_cap)
-    cap_shown = format_word_count(word_cap)
+    if word_cap is None:
+        cap_shown = None
+        cap_sentence = (
+            "No word cap is applied. Pass --word-cap to record onscreen_text_over_word_cap. "
+        )
+    else:
+        cap_shown = format_word_count(word_cap)
+        cap_sentence = (
+            "An optional word cap of %s is in effect; page 1 is exempt. " % cap_shown
+        )
     source = Path(path).resolve(strict=True)
     result = {
         "schema_version": 1,
@@ -588,8 +593,7 @@ def audit(path, word_cap=None):
             "It skips slide-number placeholders, digit-only page numbers, and ≤15pt source lines "
             "(a source marker, or a ≤15pt paragraph in the bottom 15% of the slide). "
             "Other ≤15pt body text still counts, so shrinking the font does not hide overflow. "
-            "Page 1 is exempt as the cover. "
-            + ("The default cap is 56 words; this report used %s. " % cap_shown)
+            + cap_sentence
             + "Runs without an explicit size are counted. "
             "This is not a line-break, bullet-limit, or visual-density verdict. "
             "empty_lower_content_band is a warning only and does not change the process exit code. "
@@ -707,8 +711,8 @@ def audit(path, word_cap=None):
             shown = format_word_count(words)
             record["onscreen_word_count"] = shown
             record["onscreen_word_cap"] = cap_shown
-            record["onscreen_word_cap_exempt"] = page == 1
-            if page != 1 and words > word_cap:
+            record["onscreen_word_cap_exempt"] = word_cap is not None and page == 1
+            if word_cap is not None and page != 1 and words > word_cap:
                 record["warnings"].append({
                     "code": "onscreen_text_over_word_cap",
                     "word_count": shown,
@@ -816,8 +820,8 @@ def main():
     parser.add_argument(
         "--word-cap",
         type=float,
-        default=WORD_CAP,
-        help="On-screen word cap for content slides (default: 56; 2 CJK characters = 1 word). Page 1 is exempt.",
+        default=None,
+        help="Optional on-screen word cap. Off unless passed. 2 CJK characters = 1 word. Page 1 is exempt when the check runs.",
     )
     args = parser.parse_args()
     try:
