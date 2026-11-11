@@ -28,7 +28,7 @@
 
 默认 `editable`：用可用的演示文稿工具导入／复制版式，原生对象填充。只把真实图、照片、复杂科研图作为图片。关键公式不可用时先按 [公式](formulas.md) 尝试 OMML。回退图优先真实 TeX 透明 PNG，没有 TeX 再用 mathtext；二者都不取代可编辑 OMML。确有格式损失再报告，不默默换成整页图片，也不把 LaTeX 源码留在屏幕上。
 
-示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go、TikZ、PowerPoint、COM、WPS 或 ManimGX 不得当成 backend 失败，也不得因此改走整页图片。ManimGX 只在用户明确要求运动讲解时探测（`scripts/embed_motion.py --check`），没有它就保持 OMML 和原生形状。
+示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。封面、原生表格、文字双栏、页脚、图注、定义框和节分隔用 `scripts/layout_helpers.py`。条形图、折线和散点用 `scripts/chart_helpers.py`，数字由调用方传入。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go、TikZ、PowerPoint、COM、WPS 或 ManimGX 不得当成 backend 失败，也不得因此改走整页图片。ManimGX 只在用户明确要求运动讲解时探测（`scripts/embed_motion.py --check`），没有它就保持 OMML 和原生形状。单击出现只在用户要求时用 `scripts/appear.py`，不作为默认。
 
 先跑 `python scripts/doctor.py`。Python 3.10+ 和 python-pptx 是这道门的必需项。TeX、pdftocairo、LibreOffice、ManimGX 缺失只记在报告里，退出码仍为 0：公式图片退回 mathtext（或本机已有的其他 PNG 转换器）、渲染检查跳过、运动片段不渲染。需要留下环境记录时用 `python scripts/doctor.py --write <私有目录>/runtime-profile.json`。这份记录不含密钥，也不把某台作者机器的路径写成硬性要求。
 

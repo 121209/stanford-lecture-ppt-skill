@@ -330,6 +330,20 @@ def add_bar_chart(slide, categories, values, region, highlight=None, source=None
     )
 
 
+def add_line_chart(slide, categories, values, region, source=None):
+    """Native line chart. Numbers come from the caller. See chart_helpers.py."""
+    return _chart_helpers().add_line_chart(
+        slide, categories, values, region, source=source
+    )
+
+
+def add_scatter_chart(slide, points, region, source=None):
+    """Native scatter chart. Points come from the caller. See chart_helpers.py."""
+    return _chart_helpers().add_scatter_chart(
+        slide, points, region, source=source
+    )
+
+
 def _chart_helpers():
     if getattr(_chart_helpers, "module", None) is None:
         import importlib.util

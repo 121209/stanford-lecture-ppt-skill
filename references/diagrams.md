@@ -119,6 +119,8 @@ python scripts/diagram_helpers.py --samples assets/diagram-samples/figure-first.
 
 论文里已经给出的柱状对比，用 `add_bar_chart`（`scripts/chart_helpers.py`，`diagram_helpers.add_bar_chart` 转过去）。它写原生 `c:chart`：没有图例和图表标题，数据标签打开，数值轴从 0 起并且隐藏。要强调的那一根是 `#C00000`，其余是 `#BFBFBF`。python-pptx 有时写出负数 `c:axId`，函数会改成正数，否则 Office 架构校验失败。柱上的数由调用方传入，并且应当是论文里的数。示意流程仍用形状。
 
+短折线和散点也在同一个文件：`add_line_chart`、`add_scatter_chart`。仍是可编辑图表，没有图例和标题，数由调用方传入。做法和限制见 [版式构件](layouts.md)。不要把流程页改成折线。
+
 ## 运动讲解
 
 用户明确要求推导动画、几何运动或三维直觉时，才使用 [运动讲解](motion.md)。ManimGX 渲染 MP4，再由 `scripts/embed_motion.py` 嵌进 PPTX。这一页不代替上面的原生形状，也不代替公式页的 OMML。本机没有 ManimGX（Python 3.13 或 3.14）时，算法页仍用本节的形状，并在备注说明没有渲染动画。

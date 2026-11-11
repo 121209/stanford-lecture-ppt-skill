@@ -23,13 +23,6 @@ def load(name):
     return module
 
 
-def load_if_present(name):
-    path = ROOT / "scripts" / f"{name}.py"
-    if not path.is_file():
-        return None
-    return load(name)
-
-
 diagrams = load("diagram_helpers")
 charts = load("chart_helpers")
 embed = load("embed_motion")
@@ -196,13 +189,27 @@ class PreserveExistingTests(unittest.TestCase):
             from pptx import Presentation
 
             presentation = Presentation(str(path))
+            slide = presentation.slides[0]
             charts.add_bar_chart(
-                presentation.slides[0],
+                slide,
                 ["甲", "乙"],
                 [1.0, 2.0],
                 (700000, 1600000, 6000000, 2800000),
                 highlight=1,
                 source="来源：测试数值，不是论文结果。",
+            )
+            charts.add_line_chart(
+                slide,
+                ["甲", "乙"],
+                [1.0, 2.0],
+                (700000, 4600000, 2800000, 1400000),
+                source="来源：折线占位，不是论文结果。",
+            )
+            charts.add_scatter_chart(
+                slide,
+                [(1, 1), (2, 2)],
+                (3800000, 4600000, 2800000, 1400000),
+                source="来源：散点占位，不是论文结果。",
             )
             presentation.save(str(path))
             return path
@@ -249,29 +256,32 @@ class PreserveExistingTests(unittest.TestCase):
 
         self._exercise(produce, placeholder="dk")
 
-    def test_layout_helpers_keep_the_sentinel_when_present(self):
-        layout = load_if_present("layout_helpers")
-        if layout is None:
-            self.skipTest("layout_helpers.py is not on this branch")
+    def test_layout_helpers_keep_the_sentinel(self):
+        layout = load("layout_helpers")
 
         def produce(path, _folder):
             from pptx import Presentation
 
             presentation = Presentation(str(path))
+            slide = presentation.slides[0]
             layout.add_text(
-                presentation.slides[0],
+                slide,
                 layout.emu(0.7), layout.emu(1.4), layout.emu(4.0), layout.emu(0.5),
                 "版式新增", 20, (0x22, 0x22, 0x22),
+            )
+            layout.add_callout(
+                slide,
+                (layout.emu(0.7), layout.emu(4.6), layout.emu(5.5), layout.emu(1.3)),
+                "术语",
+                "一句可编辑的定义。",
             )
             presentation.save(str(path))
             return path
 
         self._exercise(produce)
 
-    def test_appear_keeps_the_sentinel_when_present(self):
-        appear = load_if_present("appear")
-        if appear is None:
-            self.skipTest("appear.py is not on this branch")
+    def test_appear_keeps_the_sentinel(self):
+        appear = load("appear")
 
         def produce(path, _folder):
             from pptx import Presentation

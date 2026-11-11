@@ -10,7 +10,7 @@
 
 [下载可编辑示例 PPTX](assets/demo.pptx)
 
-匿名示例展示封面、讲义式层次、公式解释、原生图表、论文工作／阅读收获双栏、总结，以及一页图优先的四步流程。前 6 页的内容保持原样，第 7 页只增加示意图。所有示例数值均为教学示意，不是论文实验结果；不含真实姓名、学校、日期或私人研究材料。`assets/diagram-samples/figure-first.pptx` 另有三页匿名样张：四步流程、双栏架构、公式图加符号说明。
+匿名示例展示封面、讲义式层次、公式解释、原生图表、论文工作／阅读收获双栏、总结，以及一页图优先的四步流程。前 6 页的内容保持原样，第 7 页只增加示意图。所有示例数值均为教学示意，不是论文实验结果；不含真实姓名、学校、日期或私人研究材料。`assets/diagram-samples/figure-first.pptx` 另有三页匿名样张：四步流程、双栏架构、公式图加符号说明。`assets/layout-samples/basics.pptx` 是封面、原生表格、文字双栏、折线、散点、图注、定义框和可选单击出现的匿名样张，其中的整数同样不是实验结果。
 
 ![封面](assets/previews/slide-01.png)
 ![层次文字](assets/previews/slide-02.png)
@@ -96,7 +96,7 @@ Codex 会检测**本地技能文件**的变化；更新未显示时重启 Codex�
 
 ## 检查工具
 
-`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`doctor.py` 检查 Python 3.10+ 和 `python-pptx`，并报告可选的 TeX、`pdftocairo`、LibreOffice、ManimGX。缺这些可选项时仍退出 0，公式图片、渲染检查和运动片段按原有方式降级。`--write` 把不含密钥、不含作者机器路径要求的 runtime profile 写到调用方指定的文件。它不要求 PowerPoint、COM、WPS 或付费 API。`safe_edit.py` 打开已有 PPTX 时默认另存工作副本并记录源文件 sha256；只有明确传入 `--in-place` 才覆盖原文件。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`chart_helpers.py` 写原生条形图。`inject_omml.py` 注入带图片回退的原生 OMML：LaTeX 由内置编译器转换，pandoc 只是备用。回退图在本机有 TeX 和 PNG 转换器时用 `tex_fallback.py` 的透明高 DPI PNG，否则需要 matplotlib mathtext。`inline_math.py` 把短符号（如 `d_k`）收成同一套 OMML 小框。用户明确要求推导动画时，`embed_motion.py` 把已经渲染好的 MP4 嵌进 PPTX；ManimGX 本身是可选的，没有它测试仍然通过。做法见 [运动讲解](references/motion.md)。
+`audit_pptx.py` 和 `run_state.py` 只依赖 Python 标准库。它们**不是独立 PPT 生成引擎**，也不能代替视觉和科学核验。`doctor.py` 检查 Python 3.10+ 和 `python-pptx`，并报告可选的 TeX、`pdftocairo`、LibreOffice、ManimGX。缺这些可选项时仍退出 0，公式图片、渲染检查和运动片段按原有方式降级。`--write` 把不含密钥、不含作者机器路径要求的 runtime profile 写到调用方指定的文件。它不要求 PowerPoint、COM、WPS 或付费 API。`safe_edit.py` 打开已有 PPTX 时默认另存工作副本并记录源文件 sha256；只有明确传入 `--in-place` 才覆盖原文件。`diagram_helpers.py` 需要 `python-pptx`，用来把节点和边写成原生形状。`chart_helpers.py` 写原生条形图，以及调用方自备数字的折线和散点。`layout_helpers.py` 写封面、原生表格、文字双栏、页脚页码、图注、定义框和节分隔。`inject_omml.py` 注入带图片回退的原生 OMML：LaTeX 由内置编译器转换，pandoc 只是备用。回退图在本机有 TeX 和 PNG 转换器时用 `tex_fallback.py` 的透明高 DPI PNG，否则需要 matplotlib mathtext。`inline_math.py` 把短符号（如 `d_k`）收成同一套 OMML 小框。用户明确要求推导动画时，`embed_motion.py` 把已经渲染好的 MP4 嵌进 PPTX；ManimGX 本身是可选的，没有它测试仍然通过。做法见 [运动讲解](references/motion.md)。用户要求单击出现时，`appear.py` 写原生进入动画；不调用就没有这段动画。版式函数见 [版式构件](references/layouts.md)。
 
 使用内置 LaTeX 编译器或运行完整测试时，需 **Python 3.10 或以上**；Python 3.8 不支持编译器的联合类型语法。建议在虚拟环境中安装完整测试所需依赖：
 
@@ -112,6 +112,7 @@ python scripts/doctor.py --json --write /tmp/stanford-lecture-runtime-profile.js
 python scripts/safe_edit.py path/to/deck.pptx --dest path/to/deck.work.pptx
 python scripts/audit_pptx.py assets/demo.pptx
 python scripts/audit_pptx.py assets/diagram-samples/figure-first.pptx
+python scripts/audit_pptx.py assets/layout-samples/basics.pptx
 python scripts/run_state.py --help
 python -m unittest discover -s tests -v
 ```
@@ -123,10 +124,11 @@ python -m unittest discover -s tests -v
 ```text
 SKILL.md                 技能入口与边界
 agents/openai.yaml       Codex界面描述
-references/              风格、流程、内容、验收与来源
-scripts/                 只读审计、制作状态、环境自检、工作副本、原生示意图、OMML 注入、可选的 MP4 嵌入
+references/              风格、流程、内容、版式构件、验收与来源
+scripts/                 只读审计、制作状态、环境自检、工作副本、原生示意图、版式对象、OMML 注入、可选的 MP4 嵌入和单击出现
 assets/demo.pptx         匿名可编辑示例（第 7 页为图优先示例）
 assets/diagram-samples/  三页匿名示意图与公式样张
+assets/layout-samples/   封面、表格、双栏、图表、图注、定义框和单击出现的匿名样张
 assets/previews/         示例与样张的渲染预览
 tests/                   辅助工具与PPTX包结构回归测试
 docs/ITERATION.md        使用、反馈、分流、验证与合并

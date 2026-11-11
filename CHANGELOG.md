@@ -8,6 +8,13 @@
 - 打开已有 PPTX 默认用 `scripts/safe_edit.py` 另存工作副本并记录源文件 sha256。只有明确传入 `--in-place` 才覆盖原文件。本来就写到新路径的助手保持原样，示例生成不会改写 `assets/demo.pptx`。
 - 未点名的既有形状必须保留。`tests/test_preserve_existing.py` 用 `PREEXISTING_SENTINEL` 在临时目录里核对会往页上加内容的助手。没有 LibreOffice 时跳过渲染。
 
+## 2026-11-10
+
+- 风格里写过、脚本里没有的日常对象补成函数：原生表格、论文封面、文字双栏、页脚页码、图加可编辑图注、细线定义框、一行节分隔。见 `scripts/layout_helpers.py` 与 [版式构件](references/layouts.md)。公式仍是 OMML，算法和架构仍是原生形状。
+- 原生图表在条形图之外增加折线和散点（`add_line_chart`、`add_scatter_chart`）。数字仍由调用方传入。样张里的整数是占位，不是测量。
+- 用户要求单击出现或逐条进入时，用 `scripts/appear.py` 写原生进入动画（瞬间出现，或 0.5–0.7 秒淡入）。不调用就没有动画。不组合对象，也不取代 OMML 或 ManimGX 的影片。
+- 匿名样张 `assets/layout-samples/basics.pptx`。
+
 ## 2026-11-09
 
 - 字阶写死：封面和内容页标题 32pt，正文至少 20pt、硬底 18pt，图注和图表标签至少 16pt，来源 13pt。结果页标题写这一页的主张。
