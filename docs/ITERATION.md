@@ -42,7 +42,7 @@
 「制作流程」七步是：
 
 1. 核对材料、任务类型、受众、时长、页数及未知状态。
-2. 大纲包含逐页目的、主要信息、素材映射、`visual_plan`、个人收获与备注重点；尚有影响范围或风格的待选项时才合并确认。
+2. 大纲先写论文类型和中心论证，再写逐页角色、主要信息、素材映射、`visual_plan`、个人收获与备注重点；尚有影响范围或风格的待选项时才合并确认。一次做完时记下类型后继续。
 3. 风格已有选择。检查可用的原生制作工具；示意图默认 python-pptx 形状。只有用户明确接受整页图片时才启用生图并固定后端。
 4. 先做一页能展示正文、原生示意图或公式的内容样张并真实检查。需要用户选择方案时先确认；已获授权且风格确定时内部检查后继续。
 5. `scripts/run_state.py` 保存门、方法、逐页任务、原图 hash、产物及检查记录。
@@ -138,7 +138,7 @@ python scripts/audit_pptx.py assets/demo.pptx
 | Failure handling | 缺证据、缺原生工具、公式无法做成可编辑对象时，是否停在受影响页并说明限制；用户未接受整页图片时保持可编辑路径 |
 | Checkpoints | 大纲与样张只在仍需用户决策时合并确认；已授权任务直接执行内部质量检查；局部修改不强制整稿门流程 |
 | Specificity | 白底、黑灰正文、红色强调、标题 30–32pt、正文 20–22pt、一页一个实质问题；文字与公式默认可编辑，复杂证据图保留原图 |
-| Resources | 按需指向 style、workflow、content、qa、provenance；写明脚本不生成 PPT，`assets/demo.pptx` 只供版式参考且不是科研证据 |
+| Resources | 按需指向 style、workflow、narrative、content、qa、provenance；写明脚本不生成 PPT，`assets/demo.pptx` 只供版式参考且不是科研证据 |
 | Architecture | 主代理独占最终 PPTX 和全局状态；能并行时一人一页，不能并行时串行，并继续留下逐页记录 |
 | Tests | `scripts/` 的行为有 `tests/` 覆盖；改脚本时要跑 `python -m unittest discover tests` |
 | Blacklist | 不外发私人材料，不读取密钥，不使用未授权的付费 API，不编造阅读日期、复现经历和实验结果，不把铺满的截图当成可编辑页，不把 codex-ppt 的整页图片组装器用于可编辑分支 |
