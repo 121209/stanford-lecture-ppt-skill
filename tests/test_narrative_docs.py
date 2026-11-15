@@ -97,3 +97,51 @@ class NarrativeDocsTest(unittest.TestCase):
         self.assertIn("12–16pt", section)
         self.assertIn("--word-cap", section)
         self.assertIn("8–12", section)
+
+    def test_communication_modes_cooperate_with_paper_arcs(self):
+        text = self.narrative
+        for label in ("`pyramid`", "`narrative`", "`instructional`", "`showcase`", "`briefing`"):
+            self.assertIn(label, text)
+        self.assertIn("结论先行的说服", text)
+        self.assertIn("讲故事", text)
+        self.assertIn("教学", text)
+        self.assertIn("展示", text)
+        self.assertIn("中性信息通报", text)
+        self.assertIn("核心信息", text)
+        self.assertIn("受众结果", text)
+        self.assertIn("页面任务（page job）", text)
+        self.assertIn("单篇精读和组会精读默认 `instructional`", text)
+        self.assertIn("不要用 mode 替换类型", text)
+        self.assertIn("拆、并、重排", text)
+        self.assertIn("直接做", text)
+        self.assertIn("mode 不能冲掉已经写明的规则", text)
+        self.assertIn("communication_mode", self.workflow)
+        self.assertIn("page_job", self.workflow)
+        self.assertIn("method.mode", self.workflow)
+        self.assertIn("页面任务", self.content)
+        self.assertIn("页面任务", self.skill)
+
+    def test_ppt_master_native_depth_is_declined(self):
+        self.assertIn("不采用 SVG 到 DrawingML 的创作管线", self.narrative)
+        self.assertIn("也不采用 18 种视觉风格", self.narrative)
+        self.assertIn("4a68cdd", self.narrative)
+        self.assertIn("不再放进其他模块", self.narrative)
+        row = self.provenance.split("ppt-master", 1)[1].split("\n", 1)[0]
+        for phrase in (
+            "逻辑优先",
+            "4a68cdd",
+            "SVG→DrawingML",
+            "18 种视觉风格",
+            "Brand/Style/Layout/Deck",
+            "attribution_guard",
+            "Flask",
+            "不再 vendor 其他模块",
+            "python-pptx",
+        ):
+            self.assertIn(phrase, row)
+        section = self.changelog.split("## 2026-11-15", 1)[1].split("## 2026-11-12", 1)[0]
+        self.assertIn("逻辑优先", section)
+        self.assertIn("instructional", section)
+        self.assertIn("SVG→DrawingML", section)
+        self.assertIn("18 种视觉风格", section)
+        self.assertIn("4a68cdd", section)

@@ -32,5 +32,6 @@
 | [cell-ppt](https://github.com/yrui-cmd/cell_figure_ppt) 与 [cell-ppt-edited](https://github.com/yrui-cmd/Cell/tree/main/plugins/cell-ppt-edited) | 图上的短标注留在对应对象旁边，各自一条。这两个技能没有整页字数上限，也没有样张。不接入付费接口、COM 或结束语。见 [屏幕密度](density.md) |
 | [nature-image2ppt](https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-image2ppt) 的 `formula_renderer.py` | 真 TeX（`xelatex` / `lualatex` / `pdflatex`）加 `standalone`、amsmath/mathtools/bm，PDF 转高 DPI PNG 或 SVG，并保留 `.tex`。本仓库只把这套渲染用作 OMML 的图片回退。不把公式标成 `editable: false`，也不在缺 TeX 时整页失败 |
 | [academa-labs/manimgx](https://github.com/academa-labs/manimgx) | 可选的运动讲解：Manim 风格场景渲染成 MP4，再嵌进 PPTX。不把它的影片当作公式或示意图的主路径。命令以它的文档为准，见 [运动讲解](motion.md) |
+| [ppt-master](https://github.com/hugohe3/ppt-master) | 逻辑优先：画第一页之前先定核心信息、受众结果和沟通 mode，结构经推敲，不照搬素材顺序。五种 mode 和页面任务已按本仓库口径写进 [文章梳理](narrative.md)。公式编译器早已放在 `scripts/vendor/pptmaster_formula/`（提交 `4a68cdd`，MIT），保持字节一致。不再 vendor 其他模块。不采用 SVG→DrawingML 管线、18 种视觉风格、Brand/Style/Layout/Deck 模板工作区、attribution_guard、Flask／TTS／视频、AI 生图、赞助商推荐，也不把母版和版式的结构化打包改成默认。Darwin 第 5 轮已因太重、且与讲义白底红强调不合而放下整套 SVG 管线和 18 种风格，本次不翻案。原生站位仍是可编辑 python-pptx 形状、OMML 和可选原生图表，优于整页生图 |
 
 这些来源不是本项目的隶属方。CS329 的白底、红强调和黑灰正文保持不变。

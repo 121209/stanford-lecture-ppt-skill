@@ -12,9 +12,11 @@
 
 ## 2. 大纲与素材映射
 
-先创建 `outline.draft.md` 或聊天中的简短大纲。单篇精读在逐页之前写两行：`论文类型：`（[文章梳理](narrative.md) 中的一类，加一句为何如此归类）和 `中心论证：`（这篇主张什么）。一次做完、用户说“直接做”时，写完这两行就继续，不因类型未经口头确认而停工。近期阅读汇报可以不填论文类型，仍按概念组织，并另记实际阅读顺序和未知日期。
+先创建 `outline.draft.md` 或聊天中的简短大纲。单篇精读在逐页之前写这几行：[文章梳理](narrative.md) 里的 `论文类型：`（一类，加一句为何如此归类）、`中心论证：`（核心信息，这篇主张什么）、`受众结果：`（听完应能指出什么）、`沟通 mode：`（`pyramid`、`narrative`、`instructional`、`showcase`、`briefing` 之一，加一句为何如此）。单篇精读和组会精读默认 `instructional`，除非用户或任务明确要另一种。一次做完、用户说“直接做”时，写完类型和 mode 就继续，不因二者未经口头确认而停工，也不再为 mode 另问一次。近期阅读汇报可以不填论文类型，仍按概念组织，并另记实际阅读顺序和未知日期；mode 仍写一行。
 
-每页列出：目的、弧线上的角色、这一页的主题、屏幕上必须看见的关键数字／对照／各 panel 读解／必要条件、版式角色、`visual_plan`、所选原图（路径＋它所支撑的那一步＋出处）、读后收获、备注里的讲解顺序。结果页的主题写成主张，不写成图号或章节名。图只映射支撑主线的那些：重复已立住观点的可以跳过或合并，支撑主要主张的不省。放多少由论文内容和该页主题决定，不设词数上限。一个主题在字号硬底 18pt 下放不下、会溢出或互相遮挡时，拆开这个主题，不删关键事实，也不把它们推进备注。拆页是为了装下，不是借机把没选上的图再巡一遍。常见密度只作参考，见 [屏幕密度](density.md)。选中的图写明路径，不让执行者自行找“类似图”。
+页序由科学论证和这个 mode 推敲出来，可以拆、并、重排、删掉没有页面任务的页、重新框定。不把章节或图号顺序原样当成页序。关键事实不删。
+
+每页列出：目的、弧线上的角色、页面任务（page job，这一页要让听众完成什么）、这一页的主题、屏幕上必须看见的关键数字／对照／各 panel 读解／必要条件、版式角色、`visual_plan`、所选原图（路径＋它所支撑的那一步＋出处）、读后收获、备注里的讲解顺序。结果页的主题写成主张，不写成图号或章节名。`briefing` 的题目式标题只用于通报页，不用于精读的结果页。图只映射支撑主线的那些：重复已立住观点的可以跳过或合并，支撑主要主张的不省。放多少由论文内容和该页主题决定，不设词数上限。一个主题在字号硬底 18pt 下放不下、会溢出或互相遮挡时，拆开这个主题，不删关键事实，也不把它们推进备注。拆页是为了装下，不是借机把没选上的图再巡一遍。常见密度只作参考，见 [屏幕密度](density.md)。选中的图写明路径，不让执行者自行找“类似图”。mode 不改这些密度和证据规则。
 
 `visual_plan.kind` 取 `native_diagram`、`paper_figure`、`table`、`equation`、`gap`、`text_ok` 之一。`text_ok` 只用于封面、过渡和纯讨论收获。方法段和结果段不要标 `text_ok`。整稿没有视觉的页，目标不超过 30%。`engine` 取 `python-pptx-shapes`、`mermaid-native`、`extract` 或 `none`。算法、架构和多步流程页的 `must_diagram` 为 true，除非这一页是写明原因的 `gap`。用户明确要求推导动画或三维直觉时，可以另写 `kind: motion`、`engine: manimgx`；这一页不替换公式页或原生示意图，做法见 [运动讲解](motion.md)。
 
@@ -58,18 +60,22 @@ python scripts/run_state.py gate --project <project> --name sample --basis "用�
 
 门确认后写最终 `deck_spec.json`。本skill不调用codex-ppt只适用于整页生图的组装器或硬编码API环境。
 
-最小规格如下，内容是真实任务数据，不是复制以下示例来填满模板。单篇精读在规格顶层写 `paper_type` 和 `central_argument`，每页写 `arc_role`，证据图用 `supports` 写它所支撑的那一步。近期阅读汇报可以不写这几项。`run_state.py` 不因缺这几项而拒绝规格。
+最小规格如下，内容是真实任务数据，不是复制以下示例来填满模板。单篇精读在规格顶层写 `paper_type`、`central_argument`、`audience_outcome` 和 `communication_mode`，每页写 `arc_role` 和 `page_job`，证据图用 `supports` 写它所支撑的那一步。`communication_mode` 只取 `pyramid`、`narrative`、`instructional`、`showcase`、`briefing`。不要把它写进 `method.mode`：`method.mode` 仍是制作路径，可编辑稿保持 `native`。近期阅读汇报可以不写 `paper_type`。`run_state.py` 不因缺这些梳理字段而拒绝规格。
 
 ```json
 {
   "route": "editable",
   "paper_type": "方法／模型／工具",
   "central_argument": "这篇相对既有方法主张了什么，一句",
+  "audience_outcome": "听完能说出这篇多做了什么，以及边界在哪里",
+  "communication_mode": "instructional",
   "method": {"tool": "本次实际使用的制作工具", "mode": "native"},
   "canonical_terms": ["统一使用的术语"],
   "slides": [{
     "id": "slide_01", "order": 1, "title": "这一页的主张，不写图号",
-    "role": "concept", "arc_role": "相对基线的表现", "key_points": ["本页核心信息"],
+    "role": "concept", "arc_role": "相对基线的表现",
+    "page_job": "听完能指出相对基线好在哪一项",
+    "key_points": ["本页核心信息"],
     "layout_intent": "为何选择这个版式",
     "visual_plan": {"kind": "native_diagram", "engine": "python-pptx-shapes", "must_diagram": true},
     "local_context": "本页所需定义和与上下页的关系，不能只写‘承接上文’",
