@@ -2,6 +2,14 @@
 
 合入 `main` 之后，若制作行为有变化，在这里追加一节。格式见 [迭代闭环](docs/ITERATION.md)。
 
+## 2026-11-15
+
+- 文章梳理补上逻辑优先：画第一页之前先定核心信息、受众结果和沟通 mode（`pyramid`、`narrative`、`instructional`、`showcase`、`briefing`）。结构可以拆、并、重排、删掉没有页面任务的页、重新框定，不照搬素材顺序。论文类型弧仍是单篇精读的科学论证主线；mode 只决定怎么对听众讲，大纲里各写一行。单篇精读和组会精读默认 `instructional`。一次做完时记下类型和 mode 后继续。每页写页面任务。mode 不改论证主线、图当证据、主张式标题、屏幕上的局限、字号和密度。原生深度只写取舍：`scripts/vendor/pptmaster_formula/`（ppt-master `4a68cdd`）保持字节一致；不采用 SVG→DrawingML、18 种视觉风格、Brand/Style/Layout/Deck 工作区、attribution_guard、Flask／TTS／视频、AI 生图、赞助商推荐，也不把母版版式打包改成默认。不再 vendor 其他模块。可编辑 python-pptx 形状、OMML 和可选原生图表不变。未改任何 PPTX。
+
+## 2026-11-12
+
+- 单篇精读补上文章梳理：以科学论证为主线，按论文类型安排弧线，图是证据而不是逐张游览，结果页标题写主张。局限和边界留在屏幕上。一次做完时记下类型后继续。规则写在 [文章梳理](references/narrative.md)，并接到 [内容与证据](references/content.md) 的「先确定讲什么」和 [制作流程](references/workflow.md) 的大纲。字号硬底、配色、每页词数（仍不设上限；`audit_pptx.py` 只有 `--word-cap` 才警告）和版式助手不变。8–12 页仍只是起点。更新本 skill 不授权重做已交付的课件，纯风格迁移不重排内容。nature-paper2ppt 只提供叙述上的借鉴，不采用它的屏幕字数预算或 12–16pt／7–9pt 字阶。
+
 ## 2026-11-11
 
 - 取消固定的每页字数上限，包括原先的 40 词和这一支一度改成的 56 词。一页放什么，由论文内容和这一页的主题决定：关键数字、对照、各 panel 的读解和必要条件留在屏幕上。在字号硬底下装不下或会溢出时拆成两页，不把关键事实推进备注。备注写讲解。cell-ppt 与 nature-paper2ppt 的常见密度留在 [屏幕密度](references/density.md)，只作参考。`audit_pptx.py` 默认不按词数警告；只有传入 `--word-cap N` 才检查。`add_table` 和文字双栏不再因整页词数失败，单行仍要在 20pt 下放得下。字号硬底、配色、公式、示意图和内容带下半部不变。
