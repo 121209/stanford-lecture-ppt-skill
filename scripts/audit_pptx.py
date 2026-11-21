@@ -6,9 +6,9 @@ Also estimates per-slide on-screen word counts. A word-cap warning is off unless
 whose title names an algorithm, method, architecture, or pipeline, and that has no
 diagram, picture, table, chart, or 「缺图」 marker, is a warning. So is raw LaTeX,
 and OMML that is not PowerPoint's a14 choice plus a picture fallback. Visible body
-text below 18pt outside the footer/source band, and text that is faint on white
-(including #BFBFBF), are warnings too. None of these warnings change the process
-exit code.
+text below 18pt outside the footer/source band, and text that is faint against
+its shape fill or against white (including #BFBFBF), are warnings too. None of
+these warnings change the process exit code.
 """
 import argparse
 import hashlib
@@ -201,17 +201,38 @@ def _channel_luminance(channel):
     return ((unit + 0.055) / 1.055) ** 2.4
 
 
-def contrast_on_white(hex_color):
-    """WCAG contrast ratio of an sRGB hex color against pure white."""
+def relative_luminance(hex_color):
     red = int(hex_color[0:2], 16)
     green = int(hex_color[2:4], 16)
     blue = int(hex_color[4:6], 16)
-    luminance = (
+    return (
         0.2126 * _channel_luminance(red)
         + 0.7152 * _channel_luminance(green)
         + 0.0722 * _channel_luminance(blue)
     )
-    return 1.05 / (luminance + 0.05)
+
+
+def contrast_ratio(foreground, background):
+    """WCAG contrast ratio between two sRGB hex colors."""
+    lighter = relative_luminance(foreground)
+    darker = relative_luminance(background)
+    if darker > lighter:
+        lighter, darker = darker, lighter
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def contrast_on_white(hex_color):
+    """WCAG contrast ratio of an sRGB hex color against pure white."""
+    return contrast_ratio(hex_color, "FFFFFF")
+
+
+def _shape_fill(shape):
+    """Explicit sRGB solid fill on the shape, else white.
+
+    A numbered bar paints its text on that fill. Text with no explicit shape
+    fill is still judged against the white slide.
+    """
+    return _srgb(shape.find("p:spPr", NS)) or "FFFFFF"
 
 
 def _format_pt(value):
@@ -266,6 +287,7 @@ def typography_findings(shape, box, slide_h, nested):
     if ph is not None and ph.get("type") == "sldNum":
         return [], []
     in_footer = _in_footer_band(box, slide_h, nested)
+    background = _shape_fill(shape)
     small = []
     pale = []
     seen = set()
@@ -301,7 +323,7 @@ def typography_findings(shape, box, slide_h, nested):
                         small.append(sz / 100.0)
                     if color and (
                         color == FORBIDDEN_TEXT_COLOR
-                        or contrast_on_white(color) < CONTRAST_MIN_ON_WHITE
+                        or contrast_ratio(color, background) < CONTRAST_MIN_ON_WHITE
                     ):
                         pale.append(color)
     return small, pale
@@ -627,8 +649,9 @@ def audit(path, word_cap=None):
             "marker are not body. Runs with no explicit size are not judged. A 16pt caption is "
             "below this body floor and may warn. "
             "low_contrast_text warns when an explicit sRGB text color contrasts below 4.5:1 "
-            "with white, and whenever that text color is #BFBFBF. Shape fills and chart series "
-            "colors are not text. Inherited theme colors with no explicit sRGB are not judged. "
+            "with that shape's explicit sRGB solid fill, or with white when the shape has no "
+            "explicit sRGB fill. Text color #BFBFBF always warns. Chart series colors are not "
+            "text. Inherited theme colors with no explicit sRGB are not judged. "
             "These two warnings do not change the process exit code."
         ),
         "warnings": [],

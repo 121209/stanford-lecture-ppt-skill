@@ -322,6 +322,190 @@ class LayoutHelperTests(unittest.TestCase):
             )
         self.assertIn("keep it to 6", str(caught.exception))
 
+    def test_same_question_trigger_geometry_and_overflow(self):
+        self.assertIsNone(layout.choose_compare_layout("只是对比一下"))
+        self.assertEqual(layout.choose_compare_layout("同一个问题，三种输入"), "same_question")
+        self.assertEqual(layout.choose_compare_layout("同维比较两种方案"), "same_question")
+        self.assertEqual(layout.choose_compare_layout("Same question, three options"), "same_question")
+        self.assertEqual(layout.choose_compare_layout("论文工作和本次笔记"), "two_column")
+        self.assertEqual(layout.choose_compare_layout("这一页画架构图"), "diagram")
+        self.assertEqual(layout.choose_compare_layout("结果表里的整数"), "table")
+        with self.assertRaises(ValueError) as mixed:
+            layout.choose_compare_layout("同一个问题的论文工作")
+        self.assertIn("one page uses one layout", str(mixed.exception))
+        for cue in layout.SAME_QUESTION_CUES:
+            self.assertEqual(layout.choose_compare_layout(cue), "same_question", cue)
+
+        prs, slide = self._deck()
+        columns = [
+            ("示意甲", {"输入": "占位短句甲", "输出": "占位短句乙", "局限": "不能当结果"}),
+            ("示意乙", {"输入": "另一句占位", "输出": "仍是占位", "局限": "没有测量"}),
+            ("示意丙", {"输入": "第三句占位", "输出": "第三句输出", "局限": "不可外推"}),
+        ]
+        layout.add_same_question(
+            slide,
+            "同一个问题，三种示意做法",
+            columns,
+            [("示例判断", "三栏文字都是占位，不能当成检索或实验。")],
+            source="来源：手写占位，不是论文。",
+            page=4,
+        )
+        with self.assertRaises(ValueError) as fourth:
+            layout.add_same_question(
+                slide, "再加一栏", columns + [("示意丁", columns[0][1])], "示例：太多。",
+            )
+        self.assertIn("next slide", str(fourth.exception))
+        self.assertIn("20pt", str(fourth.exception))
+        fresh = layout.add_blank_slide(prs)
+        with self.assertRaises(ValueError) as long_field:
+            layout.add_same_question(
+                fresh,
+                "句子太长",
+                [
+                    ("甲", {"输入": "甲" * 14, "输出": "短句"}),
+                    ("乙", {"输入": "短句", "输出": "短句"}),
+                    ("丙", {"输入": "短句", "输出": "短句"}),
+                ],
+                "示例：不缩字。",
+            )
+        self.assertIn("keep it to 6", str(long_field.exception))
+        self.assertIn("20pt", str(long_field.exception))
+        self.assertFalse(any(shape.name.startswith("compare-") for shape in fresh.shapes))
+        wide = layout.add_blank_slide(prs)
+        layout.add_same_question(
+            wide,
+            "两栏可以稍长",
+            [
+                ("甲" * 16, {"输入": "甲" * 18, "输出": "短句"}),
+                ("乙", {"输入": "短句", "输出": "甲" * 18}),
+            ],
+            "示例判断：两栏仍是占位。",
+        )
+        with self.assertRaises(ValueError):
+            layout.add_same_question(
+                wide,
+                "两栏也不能再长",
+                [
+                    ("甲", {"输入": "甲" * 20, "输出": "短句"}),
+                    ("乙", {"输入": "短句", "输出": "短句"}),
+                ],
+                "示例：超了。",
+            )
+        with self.assertRaises(ValueError) as order:
+            layout.add_same_question(
+                wide,
+                "标签顺序必须相同",
+                [
+                    ("甲", {"输入": "一句", "输出": "二句"}),
+                    ("乙", {"输出": "二句", "输入": "一句"}),
+                ],
+                "示例：顺序。",
+            )
+        self.assertIn("in that order", str(order.exception))
+        with self.assertRaises(ValueError):
+            layout.add_same_question(wide, "缺判断", columns[:2], None)
+        with self.assertRaises(ValueError) as scheme:
+            layout.add_same_question(wide, "没有这种颜色", columns[:2], "示例：不行。", scheme="blue")
+        self.assertIn("accent, ink, or navy", str(scheme.exception))
+
+        navy_slide = layout.add_blank_slide(prs)
+        layout.add_same_question(
+            navy_slide,
+            "可选栏色只改栏条",
+            columns[:2],
+            [("示例判断", "海军蓝不是默认配色。")],
+            scheme="navy",
+            page=2,
+        )
+        self.assertEqual(layout.ACCENT, (0xC0, 0x00, 0x00))
+        metrics = layout.compare_column_boxes(3, 3, 1)
+        self.assertLess(metrics["card_bottom"] + layout.emu(0.10), metrics["judgment_y"])
+        self.assertEqual(metrics["columns"][0]["w"], metrics["columns"][1]["w"])
+        self.assertEqual(metrics["columns"][1]["w"], metrics["columns"][2]["w"])
+        self.assertGreater(layout.compare_column_boxes(2, 3)["columns"][0]["w"], metrics["columns"][0]["w"])
+        with tempfile.TemporaryDirectory() as folder:
+            path = self._save(prs, folder, "compare.pptx")
+            root = ET.fromstring(_slide_xml(path, 1))
+            boxes = _named_boxes(root)
+            self._assert_compare_geometry(boxes, metrics)
+            xml = ET.tostring(root, encoding="unicode")
+            self.assertIn("1  示意甲", xml)
+            self.assertIn("示例判断", xml)
+            self.assertIn("三栏文字都是占位", xml)
+            self.assertNotIn("1F4E79", xml.upper())
+            self.assertNotIn("outerShdw", xml)
+            self.assertNotIn("gradFill", xml)
+            header = _shape_named(root, "compare-header-1")
+            self.assertIn("C00000", _fill_hex(header))
+            self.assertIn("FFFFFF", _text_hexes(header))
+            frame = _shape_named(root, "compare-frame-1")
+            self.assertIn("606060", _line_hex(frame))
+            navy = ET.fromstring(_slide_xml(path, 4))
+            navy_header = _shape_named(navy, "compare-header-1")
+            self.assertIn("1F4E79", _fill_hex(navy_header))
+            self.assertIn("FFFFFF", _text_hexes(navy_header))
+            self.assertIn("C00000", ET.tostring(navy, encoding="unicode").upper())
+            report = audit.audit(path)
+            self.assertEqual(report["slides"][0]["warnings"], [])
+            self.assertEqual(report["slides"][3]["warnings"], [])
+            self.assertEqual(report["slides"][0]["title_text"], "同一个问题，三种示意做法")
+
+    def _assert_compare_geometry(self, boxes, metrics):
+        names = {box["name"] for box in boxes}
+        for index in (1, 2, 3):
+            self.assertIn("compare-header-%d" % index, names)
+            self.assertIn("compare-frame-%d" % index, names)
+            for field in (1, 2, 3):
+                self.assertIn("compare-label-%d-%d" % (index, field), names)
+                self.assertIn("compare-body-%d-%d" % (index, field), names)
+        text_names = [
+            box for box in boxes
+            if box["name"].startswith("compare-") and not box["name"].startswith("compare-frame-")
+            or box["name"] in ("slide-title", "source-line", "page-number")
+        ]
+        for box in boxes:
+            x, y, w, h = box["box"]
+            self.assertGreaterEqual(x, 0)
+            self.assertGreaterEqual(y, 0)
+            self.assertLessEqual(x + w, layout.SLIDE_W)
+            self.assertLessEqual(y + h, layout.SLIDE_H)
+            if box["name"].startswith("compare-frame-"):
+                continue
+            if box["name"] in ("source-line", "page-number"):
+                self.assertLessEqual(min(box["sizes"]), 1500)
+            elif box["sizes"]:
+                self.assertGreaterEqual(min(box["sizes"]), 2000)
+        for i, left in enumerate(text_names):
+            for right in text_names[i + 1:]:
+                self.assertFalse(
+                    _intervals_overlap(left["box"], right["box"]),
+                    "%s overlaps %s" % (left["name"], right["name"]),
+                )
+        headers = [next(box for box in boxes if box["name"] == "compare-header-%d" % i) for i in (1, 2, 3)]
+        frames = [next(box for box in boxes if box["name"] == "compare-frame-%d" % i) for i in (1, 2, 3)]
+        self.assertEqual(headers[0]["box"][1], headers[1]["box"][1])
+        self.assertEqual(headers[0]["box"][2], headers[1]["box"][2])
+        self.assertEqual(headers[1]["box"][2], headers[2]["box"][2])
+        gutter = headers[1]["box"][0] - (headers[0]["box"][0] + headers[0]["box"][2])
+        self.assertEqual(gutter, metrics["gutter"])
+        self.assertGreaterEqual(gutter, layout.emu(0.12))
+        for index, frame in enumerate(frames):
+            self.assertEqual(frame["box"], metrics["columns"][index]["frame"])
+            self.assertEqual(headers[index]["box"], metrics["columns"][index]["header"])
+        for field in (1, 2, 3):
+            ys = []
+            for column in (1, 2, 3):
+                label = next(box for box in boxes if box["name"] == "compare-label-%d-%d" % (column, field))
+                body = next(box for box in boxes if box["name"] == "compare-body-%d-%d" % (column, field))
+                ys.append(label["box"][1])
+                self.assertGreaterEqual(label["box"][1], headers[0]["box"][1] + headers[0]["box"][3])
+                self.assertGreaterEqual(body["box"][1], label["box"][1] + label["box"][3] - 1)
+                self.assertLessEqual(body["box"][1] + body["box"][3], frames[0]["box"][1] + frames[0]["box"][3])
+            self.assertEqual(len(set(ys)), 1)
+        judgment = next(box for box in boxes if box["name"] == "compare-judgment-1")
+        self.assertGreaterEqual(judgment["box"][1], frames[0]["box"][1] + frames[0]["box"][3])
+        self.assertEqual(judgment["box"][1], metrics["judgment_y"])
+
     def test_sample_deck_stays_inside_the_lecture_rules(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "basics.pptx"
@@ -334,9 +518,57 @@ class CheckedInLayoutSampleTests(unittest.TestCase):
         assert_sample(self, ROOT / "assets" / "layout-samples" / "basics.pptx")
 
 
+def _shape_named(root, name):
+    for shape in root.iter("{%s}sp" % P_NS):
+        info = shape.find(".//{%s}cNvPr" % P_NS)
+        if info is not None and info.get("name") == name:
+            return shape
+    raise AssertionError(name)
+
+
+def _fill_hex(shape):
+    fill = shape.find("./{%s}spPr/{%s}solidFill/{%s}srgbClr" % (P_NS, A_NS, A_NS))
+    return "" if fill is None else (fill.get("val") or "").upper()
+
+
+def _line_hex(shape):
+    line = shape.find("./{%s}spPr/{%s}ln/{%s}solidFill/{%s}srgbClr" % (P_NS, A_NS, A_NS, A_NS))
+    return "" if line is None else (line.get("val") or "").upper()
+
+
+def _text_hexes(shape):
+    return [
+        (node.get("val") or "").upper()
+        for node in shape.findall(".//{%s}rPr/{%s}solidFill/{%s}srgbClr" % (A_NS, A_NS, A_NS))
+    ]
+
+
+def _named_boxes(root):
+    boxes = []
+    for shape in root.iter("{%s}sp" % P_NS):
+        info = shape.find(".//{%s}cNvPr" % P_NS)
+        off = shape.find("./{%s}spPr/{%s}xfrm/{%s}off" % (P_NS, A_NS, A_NS))
+        ext = shape.find("./{%s}spPr/{%s}xfrm/{%s}ext" % (P_NS, A_NS, A_NS))
+        if info is None or off is None or ext is None:
+            continue
+        sizes = [int(node.get("sz")) for node in shape.iter("{%s}rPr" % A_NS) if node.get("sz")]
+        boxes.append({
+            "name": info.get("name") or "",
+            "box": (int(off.get("x")), int(off.get("y")), int(ext.get("cx")), int(ext.get("cy"))),
+            "sizes": sizes,
+        })
+    return boxes
+
+
+def _intervals_overlap(a, b):
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return not (ax + aw <= bx or bx + bw <= ax or ay + ah <= by or by + bh <= ay)
+
+
 def assert_sample(case, path):
     report = audit.audit(path)
-    case.assertEqual(report["slide_count"], 9)
+    case.assertEqual(report["slide_count"], 10)
     case.assertEqual(report["slides_over_word_cap"], [])
     case.assertEqual(report["slides_with_empty_lower_content_band"], [])
     case.assertEqual(report["slides_missing_diagram"], [])
@@ -353,14 +585,22 @@ def assert_sample(case, path):
         names = package.namelist()
         case.assertFalse(any(name.endswith(".mp4") for name in names))
         timed = []
-        for index in range(1, 10):
+        for index in range(1, 11):
             xml = package.read("ppt/slides/slide%d.xml" % index)
             if b"timing" in xml:
                 timed.append(index)
-        case.assertEqual(timed, [9])
-        last = package.read("ppt/slides/slide9.xml").decode("utf-8")
+        case.assertEqual(timed, [10])
+        last = package.read("ppt/slides/slide10.xml").decode("utf-8")
         case.assertEqual(last.count('nodeType="clickEffect"'), 3)
         case.assertNotIn("<p:transition", last)
+        ninth = package.read("ppt/slides/slide9.xml").decode("utf-8")
+        case.assertIn("示例判断", ninth)
+        case.assertIn("占位短句甲", ninth)
+        case.assertIn("1  示意甲", ninth)
+        case.assertNotIn("1F4E79", ninth.upper())
+        case.assertNotIn("InSAR", ninth)
+        case.assertNotIn("中国科学院", ninth)
+        case.assertEqual(report["slides"][8]["title_text"], "同一个问题，三种示意做法")
     saved = sys.argv
     try:
         sys.argv = ["audit_pptx.py", str(path)]

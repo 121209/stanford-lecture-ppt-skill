@@ -30,7 +30,7 @@ description: "制作、迁移或局部修改斯坦福 CS329/CS329Z 讲义风格�
 - 制作前读 [风格与版式](references/style.md) 和 [制作流程](references/workflow.md)。
 - 论文、读图、公式和讲稿读 [内容与证据](references/content.md)。单篇精读的论证主线和沟通 mode 见 [文章梳理](references/narrative.md)。
 - 算法、架构和多步流程读 [示意图](references/diagrams.md)。公式页读 [公式](references/formulas.md)。用户明确要求的推导动画或三维直觉读 [运动讲解](references/motion.md)，不作为默认路径。
-- 封面、原生表格、文字双栏、页脚页码、图注、定义框和节分隔读 [版式构件](references/layouts.md)。单击出现只在用户要求时使用，默认不加。
+- 封面、原生表格、文字双栏、同题比较、页脚页码、图注、定义框和节分隔读 [版式构件](references/layouts.md)。单击出现只在用户要求时使用，默认不加。同题比较只在触发成立时使用，默认栏条仍是红色强调。
 - 导出前读 [验收](references/qa.md)。
 - 查看 [流程来源](references/provenance.md) 了解与codex-ppt的继承和差异。
 - `assets/demo.pptx` 及 `assets/previews/` 只供布局与编辑性参考。不要把示意数值、标题或读后感带入用户的新报告。
@@ -42,7 +42,7 @@ description: "制作、迁移或局部修改斯坦福 CS329/CS329Z 讲义风格�
 以下密度、页型比例、补充内容、页码重排及流程门规则适用于新稿或明确授权的内容重构。纯风格迁移和小修以原内容保真为准，不能为了达到指标而改正文、备注、页数、图表或用户留白。当前参考文件的字号、配色与尺寸优先于下面的默认值。
 
 1. 纯白底，黑灰正文，统一红色标题或关键词；封面和页标题 32pt，正文至少 20pt（硬底 18pt）。长内容先精简或调整版式，不靠持续缩字。字阶见 [风格与版式](references/style.md)。
-2. 一页一个实质问题或结论。按内容使用层次文字、公式加解释、证据图加读图说明、双栏比较等，不全稿重复三卡片。
+2. 一页一个实质问题或结论。按内容使用层次文字、公式加解释、证据图加读图说明、双栏比较、同题比较等，不全稿重复三卡片。同题比较只在同一个问题要并排 2 或 3 种做法、且每种都按同一组标签填写时使用。默认栏条仍是红色强调，不把整页改成蓝色。触发、尺寸和拆页见 [版式构件](references/layouts.md)。
    - 🔴 屏幕上放这一页主题需要的内容，不设固定字数上限。一页一个主题。把听众从论文里看懂这个主题所需的关键数字、对照、各 panel 的读解，以及会改变含义的条件或定义，写在屏幕上。不要只留一图一句，把这些事实推进备注。论文原图内部的轴、图例和 panel 字母算在图里。一个主题在字号硬底下装不下、会溢出或互相遮挡时，拆成两页，不靠删内容或把关键事实移进备注来硬塞。不缩字，不拉伸位图。cell-ppt 和 nature-paper2ppt 的常见密度只作参考，见 [屏幕密度](references/density.md)，不当成上限。`assets/demo.pptx` 只参考版式。
    - 论文讲解（单篇/精读）：第1页即显示论文题目、作者、会议/年份（≥18pt，不只放页脚）。内容页按 [文章梳理](references/narrative.md) 的论文类型和论证弧线安排，不按章节或图号逐页搬运；局限和边界留在屏幕上。沟通 mode 默认 instructional，只决定怎么对听众讲，不替换类型弧线，也不改字号和密度。至少一半内容页以图、表、公式或原生逻辑图为主体。
    - 渲染后自检：确认这一页屏幕上有该主题需要的事实，字号不低于硬底，文字不溢出、不互相遮挡。装不下就拆页，再记入 `record --qa-note`。默认审计不按词数警告。
@@ -73,7 +73,7 @@ description: "制作、迁移或局部修改斯坦福 CS329/CS329Z 讲义风格�
 
 Linux 组会默认用 python-pptx 画原生形状和连接线（`scripts/diagram_helpers.py`）。Mermaid 落到原生形状是可选增强。环境里没有 officecli、Go、TikZ 或生图 API 时，仍走形状路径，不改成整页 PNG。只有用户明确要求生图、AI 示意图或 graphical abstract 时才允许概念草稿；草稿不是实验证据。
 
-`scripts/audit_pptx.py` 与 `scripts/run_state.py` 只依赖 Python 标准库，不生成 PPT。`scripts/diagram_helpers.py` 另需 python-pptx，用来写形状。`scripts/chart_helpers.py` 写原生条形图，以及调用方自备数字的折线和散点。`scripts/layout_helpers.py` 写封面、原生表格、文字双栏、页脚页码、图加图注、定义框和节分隔，都是可编辑对象。`scripts/inject_omml.py` 把 `{{MATH:id}}` 换成带图片回退的原生 OMML：LaTeX 走内置编译器，pandoc 只是编译失败时的备用。回退图优先 `scripts/tex_fallback.py` 的真实 TeX 透明 PNG（可选；引擎 `xelatex` / `lualatex` / `pdflatex`，再加 `pdftocairo`、`gs` 或 ImageMagick），否则用 matplotlib mathtext。缺 TeX 不整页失败。完整制作仍需具备原生 PPTX 生成与渲染能力的工具。未安装 codex-ppt 也可使用本 skill；不把其整页图片组装器用于可编辑分支。
+`scripts/audit_pptx.py` 与 `scripts/run_state.py` 只依赖 Python 标准库，不生成 PPT。`scripts/diagram_helpers.py` 另需 python-pptx，用来写形状。`scripts/chart_helpers.py` 写原生条形图，以及调用方自备数字的折线和散点。`scripts/layout_helpers.py` 写封面、原生表格、文字双栏、同题比较、页脚页码、图加图注、定义框和节分隔，都是可编辑对象。同题比较的标题条默认用讲义强调色；`ink` 和 `navy` 只在调用该页时改变标题条。`scripts/inject_omml.py` 把 `{{MATH:id}}` 换成带图片回退的原生 OMML：LaTeX 走内置编译器，pandoc 只是编译失败时的备用。回退图优先 `scripts/tex_fallback.py` 的真实 TeX 透明 PNG（可选；引擎 `xelatex` / `lualatex` / `pdflatex`，再加 `pdftocairo`、`gs` 或 ImageMagick），否则用 matplotlib mathtext。缺 TeX 不整页失败。完整制作仍需具备原生 PPTX 生成与渲染能力的工具。未安装 codex-ppt 也可使用本 skill；不把其整页图片组装器用于可编辑分支。
 
 用户要求单击后出现或逐条进入时，用 `scripts/appear.py` 写原生进入动画（瞬间出现，或 0.5–0.7 秒淡入）。不调用就没有这段动画。它不组合对象，也不取代 OMML、原生形状或 ManimGX。
 

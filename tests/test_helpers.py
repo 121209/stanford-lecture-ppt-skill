@@ -1042,6 +1042,43 @@ class HelperTests(unittest.TestCase):
         self.assertGreater(audit.contrast_on_white('606060'), 4.5)
         self.assertLess(audit.contrast_on_white('BFBFBF'), 4.5)
 
+    def test_contrast_follows_explicit_shape_fill(self):
+        def filled(number, text, text_color, fill, y=1600000):
+            fill_xml = ''
+            if fill:
+                fill_xml = '<a:solidFill><a:srgbClr val="%s"/></a:solidFill>' % fill
+            return (
+                '<p:sp>'
+                '<p:nvSpPr><p:cNvPr id="%d" name="bar"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+                '<p:spPr><a:xfrm><a:off x="700000" y="%d"/><a:ext cx="4000000" cy="500000"/></a:xfrm>'
+                '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>%s</p:spPr>'
+                '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="2000">'
+                '<a:solidFill><a:srgbClr val="%s"/></a:solidFill></a:rPr>'
+                '<a:t>%s</a:t></a:r></a:p></p:txBody></p:sp>'
+            ) % (number, y, fill_xml, text_color, text)
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'fill.pptx'
+            write_raw_deck(path, [
+                filled(2, '封面', '222222', 'FFFFFF'),
+                filled(2, '白字红条', 'FFFFFF', 'C00000'),
+                filled(2, '白字无底', 'FFFFFF', None),
+                filled(2, '浅灰深底', 'BFBFBF', '222222'),
+                filled(2, '墨色白底', '222222', 'FFFFFF'),
+            ])
+            report = audit.audit(path)
+
+        def codes(slide):
+            return [item['code'] for item in slide['warnings']]
+
+        self.assertNotIn('low_contrast_text', codes(report['slides'][1]))
+        self.assertIn('low_contrast_text', codes(report['slides'][2]))
+        self.assertIn('low_contrast_text', codes(report['slides'][3]))
+        self.assertNotIn('low_contrast_text', codes(report['slides'][4]))
+        self.assertGreaterEqual(audit.contrast_ratio('FFFFFF', 'C00000'), 4.5)
+        self.assertGreaterEqual(audit.contrast_ratio('FFFFFF', '1F4E79'), 4.5)
+        self.assertLess(audit.contrast_ratio('FFFFFF', 'FFFFFF'), 4.5)
+
     def test_dfrac_fallback_keeps_omml_frac_and_png_is_transparent(self):
         from PIL import Image
         inject = load('inject_omml')

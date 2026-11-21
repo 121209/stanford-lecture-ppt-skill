@@ -18,7 +18,7 @@
 
 每页列出：目的、弧线上的角色、页面任务（page job，这一页要让听众完成什么）、这一页的主题、屏幕上必须看见的关键数字／对照／各 panel 读解／必要条件、版式角色、`visual_plan`、所选原图（路径＋它所支撑的那一步＋出处）、读后收获、备注里的讲解顺序。结果页的主题写成主张，不写成图号或章节名。`briefing` 的题目式标题只用于通报页，不用于精读的结果页。图只映射支撑主线的那些：重复已立住观点的可以跳过或合并，支撑主要主张的不省。放多少由论文内容和该页主题决定，不设词数上限。一个主题在字号硬底 18pt 下放不下、会溢出或互相遮挡时，拆开这个主题，不删关键事实，也不把它们推进备注。拆页是为了装下，不是借机把没选上的图再巡一遍。常见密度只作参考，见 [屏幕密度](density.md)。选中的图写明路径，不让执行者自行找“类似图”。mode 不改这些密度和证据规则。
 
-`visual_plan.kind` 取 `native_diagram`、`paper_figure`、`table`、`equation`、`gap`、`text_ok` 之一。`text_ok` 只用于封面、过渡和纯讨论收获。方法段和结果段不要标 `text_ok`。整稿没有视觉的页，目标不超过 30%。`engine` 取 `python-pptx-shapes`、`mermaid-native`、`extract` 或 `none`。算法、架构和多步流程页的 `must_diagram` 为 true，除非这一页是写明原因的 `gap`。用户明确要求推导动画或三维直觉时，可以另写 `kind: motion`、`engine: manimgx`；这一页不替换公式页或原生示意图，做法见 [运动讲解](motion.md)。
+`visual_plan.kind` 取 `native_diagram`、`paper_figure`、`table`、`equation`、`gap`、`text_ok`、`same_question` 之一。`same_question` 只用于 [版式构件](layouts.md) 里触发成立的同题比较，不代替方法页的原生示意图。`text_ok` 只用于封面、过渡和纯讨论收获。方法段和结果段不要标 `text_ok`。整稿没有视觉的页，目标不超过 30%。`engine` 取 `python-pptx-shapes`、`mermaid-native`、`extract` 或 `none`。算法、架构和多步流程页的 `must_diagram` 为 true，除非这一页是写明原因的 `gap`。用户明确要求推导动画或三维直觉时，可以另写 `kind: motion`、`engine: manimgx`；这一页不替换公式页或原生示意图，做法见 [运动讲解](motion.md)。
 
 大纲、图映射和样张策略先在内部具体化。只有仍存在影响范围或风格的待选项时，才合并向用户确认；当前明确的制作指令已构成授权时直接继续，详细逐页清单可作为大纲依据。不要因用户未额外说“直接做”而停工。
 
@@ -32,7 +32,7 @@
 
 默认 `editable`：用可用的演示文稿工具导入／复制版式，原生对象填充。只把真实图、照片、复杂科研图作为图片。关键公式不可用时先按 [公式](formulas.md) 尝试 OMML。回退图优先真实 TeX 透明 PNG，没有 TeX 再用 mathtext；二者都不取代可编辑 OMML。确有格式损失再报告，不默默换成整页图片，也不把 LaTeX 源码留在屏幕上。
 
-示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。封面、原生表格、文字双栏、页脚、图注、定义框和节分隔用 `scripts/layout_helpers.py`。条形图、折线和散点用 `scripts/chart_helpers.py`，数字由调用方传入。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go、TikZ、PowerPoint、COM、WPS 或 ManimGX 不得当成 backend 失败，也不得因此改走整页图片。ManimGX 只在用户明确要求运动讲解时探测（`scripts/embed_motion.py --check`），没有它就保持 OMML 和原生形状。单击出现只在用户要求时用 `scripts/appear.py`，不作为默认。
+示意图默认用 `scripts/diagram_helpers.py`（python-pptx 形状）。封面、原生表格、文字双栏、同题比较、页脚、图注、定义框和节分隔用 `scripts/layout_helpers.py`。同题比较先看 `choose_compare_layout`；返回 `same_question` 才调用 `add_same_question`。条形图、折线和散点用 `scripts/chart_helpers.py`，数字由调用方传入。backend 门确认本环境能写出原生 PPTX，并检查能否导入 python-pptx。可以顺带探测 `mmdc` 和 `dot`，有则当作可选布局参考；没有不影响这道门。缺少生图 API、officecli、Go、TikZ、PowerPoint、COM、WPS 或 ManimGX 不得当成 backend 失败，也不得因此改走整页图片。ManimGX 只在用户明确要求运动讲解时探测（`scripts/embed_motion.py --check`），没有它就保持 OMML 和原生形状。单击出现只在用户要求时用 `scripts/appear.py`，不作为默认。
 
 先跑 `python scripts/doctor.py`。Python 3.10+ 和 python-pptx 是这道门的必需项。TeX、pdftocairo、LibreOffice、ManimGX 缺失只记在报告里，退出码仍为 0：公式图片退回 mathtext（或本机已有的其他 PNG 转换器）、渲染检查跳过、运动片段不渲染。需要留下环境记录时用 `python scripts/doctor.py --write <私有目录>/runtime-profile.json`。这份记录不含密钥，也不把某台作者机器的路径写成硬性要求。
 
