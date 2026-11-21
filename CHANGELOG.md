@@ -2,6 +2,11 @@
 
 合入 `main` 之后，若制作行为有变化，在这里追加一节。格式见 [迭代闭环](docs/ITERATION.md)。
 
+## 2026-11-21
+
+- 可选版式「同题比较」：一个问题下 2 或 3 栏，编号标题条，各栏共用输入／输出／局限等标签，底部一行或两行综合判断。默认标题条用本讲义强调色 `#C00000`，不把参考图的蓝当作默认配色。`scheme="ink"` 或 `scheme="navy"` 只改这一页的标题条。栏内 20pt 放不下一行，或做法多于 3 个时拆到下一页，不缩字。触发见 `choose_compare_layout`。示例在 `assets/layout-samples/basics.pptx` 第 9 页，句子是占位。
+- 文字对比度：形状有明确 sRGB 纯色填充时，按该填充计算；没有填充时仍相对白底。白字标题条不再被当成白底上的白字。`#BFBFBF` 仍一律警告。填充上单独的 `a:alpha` 先叠到白底上再算，全透明的深色填充不会把白字判成高对比；其他颜色变换仍相对白底。
+
 ## 2026-11-15
 
 - 文章梳理补上逻辑优先：画第一页之前先定核心信息、受众结果和沟通 mode（`pyramid`、`narrative`、`instructional`、`showcase`、`briefing`）。结构可以拆、并、重排、删掉没有页面任务的页、重新框定，不照搬素材顺序。论文类型弧仍是单篇精读的科学论证主线；mode 只决定怎么对听众讲，大纲里各写一行。单篇精读和组会精读默认 `instructional`。一次做完时记下类型和 mode 后继续。每页写页面任务。mode 不改论证主线、图当证据、主张式标题、屏幕上的局限、字号和密度。原生深度只写取舍：`scripts/vendor/pptmaster_formula/`（ppt-master `4a68cdd`）保持字节一致；不采用 SVG→DrawingML、18 种视觉风格、Brand/Style/Layout/Deck 工作区、attribution_guard、Flask／TTS／视频、AI 生图、赞助商推荐，也不把母版版式打包改成默认。不再 vendor 其他模块。可编辑 python-pptx 形状、OMML 和可选原生图表不变。未改任何 PPTX。

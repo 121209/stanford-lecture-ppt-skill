@@ -6,8 +6,10 @@ picture plus caption, and a thin definition box. They do not draw formulas,
 flow diagrams, or video. Charts stay in ``chart_helpers.py``. Click entrance
 animations stay in ``appear.py`` and are not applied here.
 
-Colors are the lecture palette: white, #222222, #C00000, #606060. Body text
-is at least 20pt. Source lines are 13pt and must carry a source marker.
+Colors are the lecture palette: white, #222222, #C00000, #606060. A same-question
+comparison may paint its column bars with that accent, or with ink or an optional
+navy when the caller asks. Navy is not the default and does not replace the accent.
+Body text is at least 20pt. Source lines are 13pt and must carry a source marker.
 Page text is digits only. Nothing in this file is a measured result.
 """
 import argparse
@@ -47,6 +49,55 @@ MAX_TABLE_ROWS = 5
 CELL_WORD_CAP = 6
 # One 20pt line in a half-width column. This is a line-fit limit, not a slide cap.
 POINT_WORD_CAP = 10
+# Same-question columns. Caps keep one 20pt line inside the column after inset.
+# At 20pt a CJK em is 20/72 in. Counts use the audit rule (2 CJK = 1 word).
+# 3 columns: inner text width 3.59 in → 12 CJK → 6 words.
+# 2 columns: inner text width 5.57 in → 18 CJK → 9 words, one glyph of slack.
+# 3-column headers also hold a digit, so the title itself stops at 5 words.
+COMPARE_MIN_COLUMNS = 2
+COMPARE_MAX_COLUMNS = 3
+COMPARE_MIN_LABELS = 2
+COMPARE_MAX_LABELS = 4
+COMPARE_MAX_JUDGMENT_LINES = 2
+COMPARE_HEADER_PT = 20
+COMPARE_FIELD_PT = 20
+COMPARE_JUDGMENT_PT = 20
+COMPARE_FRAME_PT = 1.0
+COMPARE_GUTTER_IN = {2: 0.20, 3: 0.14}
+COMPARE_CARD_TOP_IN = 1.12
+COMPARE_HEADER_H_IN = 0.46
+COMPARE_AFTER_HEADER_IN = 0.10
+COMPARE_LABEL_H_IN = 0.36
+COMPARE_BODY_H_IN = 0.40
+COMPARE_AFTER_FIELD_IN = 0.08
+COMPARE_CARD_PAD_IN = 0.12
+COMPARE_INSET_IN = 0.14
+COMPARE_JUDGMENT_Y_IN = 5.22
+COMPARE_JUDGMENT_H_IN = 0.42
+COMPARE_JUDGMENT_GAP_IN = 0.06
+COMPARE_HEADER_WORD_CAP = {2: 8, 3: 5}
+COMPARE_BODY_WORD_CAP = {2: 9, 3: 6}
+COMPARE_LABEL_WORD_CAP = 4
+COMPARE_KEYWORD_WORD_CAP = 8
+COMPARE_JUDGMENT_WORD_CAP = 18
+COMPARE_BAR_TEXT = WHITE
+# Optional bar colors for this layout only. "accent" is the lecture red.
+# "navy" (#1F4E79) is opt-in: white text on it clears 4.5:1, and the hex is
+# not measured from a photograph. It does not change ACCENT or other slides.
+COMPARE_SCHEMES = {
+    "accent": {"bar": ACCENT},
+    "ink": {"bar": INK},
+    "navy": {"bar": (0x1F, 0x4E, 0x79)},
+}
+SAME_QUESTION_CUES = (
+    "同一个问题", "同一问题", "同题", "同维", "同构比较", "同构栏",
+    "两种做法", "三种做法", "两种输入", "三种输入", "两种方案", "三种方案",
+    "并列方案", "same question", "same-dimension",
+)
+PAPER_NOTES_CUES = ("论文工作", "个人收获", "本次笔记", "阅读收获")
+DIAGRAM_CUES = ("架构图", "流程图", "流程步骤", "双栏架构")
+TABLE_CUES = ("数值表", "结果表", "原生表格")
+_SPLIT_HINT = "Split onto the next slide and keep 20pt; do not shrink the type."
 
 
 def emu(inches):
@@ -204,6 +255,30 @@ def add_text(slide, x, y, w, h, text, size, color, align="left", bold=False, anc
     paragraph.text = text
     _style_run(paragraph.runs[0], size, _rgb(api, color), api, bold=bold)
     return box
+
+
+def _set_runs(paragraph, runs, size, api, align="left"):
+    """Replace the paragraph's runs. ``runs`` is (text, RGB tuple, bold)."""
+    paragraph.alignment = {
+        "left": api["PP_ALIGN"].LEFT,
+        "center": api["PP_ALIGN"].CENTER,
+    }[align]
+    parent = paragraph._p
+    for child in list(parent):
+        if child.tag == api["qn"]("a:r"):
+            parent.remove(child)
+    for text, color, bold in runs:
+        run = paragraph.add_run()
+        run.text = text
+        _style_run(run, size, _rgb(api, color), api, bold=bold)
+    return paragraph
+
+
+def _margins(frame, api, left, right, top, bottom):
+    frame.margin_left = api["Emu"](left)
+    frame.margin_right = api["Emu"](right)
+    frame.margin_top = api["Emu"](top)
+    frame.margin_bottom = api["Emu"](bottom)
 
 
 def _write_lines(box, lines, size, color, api, align="left", bold=False):
@@ -652,6 +727,341 @@ def add_callout(slide, region, term, body, read=None):
     return shape
 
 
+def _has_cue(text, cues):
+    folded = text.lower()
+    for cue in cues:
+        if all(ord(char) < 128 for char in cue):
+            if cue.lower() in folded:
+                return cue
+        elif cue in text:
+            return cue
+    return None
+
+
+def choose_compare_layout(brief):
+    """Route a page brief to one comparison layout, or None.
+
+    ``same_question`` needs an explicit shared-question cue (同一个问题, 同题,
+    同维, 两种/三种做法 or 输入 or 方案, 并列方案, ``same question``,
+    ``same-dimension``). A bare 对比 is not enough.
+
+    ``two_column`` is paper work versus notes. ``diagram`` is an architecture
+    or a step sequence. ``table`` is a numeric grid. Two of these cues in one
+    brief raise, so the page is not given both layouts.
+    """
+    if not isinstance(brief, str) or not brief.strip():
+        raise ValueError("brief must be non-empty text")
+    text = brief.strip()
+    hits = []
+    if _has_cue(text, SAME_QUESTION_CUES):
+        hits.append("same_question")
+    if _has_cue(text, PAPER_NOTES_CUES):
+        hits.append("two_column")
+    if _has_cue(text, DIAGRAM_CUES):
+        hits.append("diagram")
+    if _has_cue(text, TABLE_CUES):
+        hits.append("table")
+    if len(hits) > 1:
+        raise ValueError("brief matches %s; one page uses one layout" % " and ".join(hits))
+    if not hits:
+        return None
+    return hits[0]
+
+
+def compare_column_boxes(n_columns, n_labels, n_judgments=1):
+    """EMU boxes for a 2- or 3-column same-question slide.
+
+    Column widths match, gutters match, and the judgment stays below the cards
+    and above the footer. The function raises instead of shrinking type.
+    """
+    if isinstance(n_columns, bool) or not isinstance(n_columns, int):
+        raise ValueError("column count must be an integer")
+    if n_columns not in (COMPARE_MIN_COLUMNS, COMPARE_MAX_COLUMNS):
+        raise ValueError(
+            "same-question compare takes 2 or 3 columns; got %d. "
+            "Split extra options onto the next slide at 20pt, and repeat the shared question."
+            % n_columns
+        )
+    if isinstance(n_labels, bool) or not isinstance(n_labels, int):
+        raise ValueError("label count must be an integer")
+    if not COMPARE_MIN_LABELS <= n_labels <= COMPARE_MAX_LABELS:
+        raise ValueError(
+            "same-question compare needs %d to %d shared labels; got %d. "
+            "Split extra dimensions onto the next slide at 20pt."
+            % (COMPARE_MIN_LABELS, COMPARE_MAX_LABELS, n_labels)
+        )
+    if isinstance(n_judgments, bool) or not isinstance(n_judgments, int) or not (
+        1 <= n_judgments <= COMPARE_MAX_JUDGMENT_LINES
+    ):
+        raise ValueError("judgment must be 1 or 2 lines so 20pt stays above the footer")
+    gutter = emu(COMPARE_GUTTER_IN[n_columns])
+    usable = TEXT_W - gutter * (n_columns - 1)
+    width = usable // n_columns
+    if width * n_columns != usable:
+        raise ValueError("column width does not divide evenly; check the gutter")
+    inset = emu(COMPARE_INSET_IN)
+    card_y = emu(COMPARE_CARD_TOP_IN)
+    header_h = emu(COMPARE_HEADER_H_IN)
+    cursor = card_y + header_h + emu(COMPARE_AFTER_HEADER_IN)
+    label_h = emu(COMPARE_LABEL_H_IN)
+    body_h = emu(COMPARE_BODY_H_IN)
+    field_gap = emu(COMPARE_AFTER_FIELD_IN)
+    fields = []
+    for index in range(n_labels):
+        fields.append({
+            "label_y": cursor,
+            "label_h": label_h,
+            "body_y": cursor + label_h,
+            "body_h": body_h,
+        })
+        cursor += label_h + body_h
+        if index != n_labels - 1:
+            cursor += field_gap
+    card_bottom = cursor + emu(COMPARE_CARD_PAD_IN)
+    judgment_y = emu(COMPARE_JUDGMENT_Y_IN)
+    judgment_h = emu(COMPARE_JUDGMENT_H_IN)
+    judgment_gap = emu(COMPARE_JUDGMENT_GAP_IN)
+    if card_bottom + emu(0.10) > judgment_y:
+        raise ValueError(
+            "columns would collide with the judgment; split a label row onto the next slide at 20pt"
+        )
+    judgment_bottom = judgment_y + n_judgments * judgment_h + (n_judgments - 1) * judgment_gap
+    if judgment_bottom > emu(6.40):
+        raise ValueError("judgment would collide with the footer; keep it to two 20pt lines")
+    columns = []
+    for index in range(n_columns):
+        x = MARGIN_X + index * (width + gutter)
+        columns.append({
+            "x": x,
+            "w": width,
+            "frame": (x, card_y, width, card_bottom - card_y),
+            "header": (x, card_y, width, header_h),
+            "text_x": x + inset,
+            "text_w": width - 2 * inset,
+        })
+    return {
+        "columns": columns,
+        "fields": fields,
+        "card_bottom": card_bottom,
+        "judgment_y": judgment_y,
+        "judgment_h": judgment_h,
+        "judgment_gap": judgment_gap,
+        "gutter": gutter,
+    }
+
+
+def _fit_line(text, limit, label):
+    try:
+        return _line(text, limit, label)
+    except ValueError as exc:
+        raise ValueError(str(exc) + " " + _SPLIT_HINT) from None
+
+
+def _one_judgment(item):
+    if isinstance(item, (list, tuple)):
+        if len(item) != 2:
+            raise ValueError("judgment pair must be (keyword, conclusion)")
+        keyword, conclusion = item
+    elif isinstance(item, str):
+        if "：" in item:
+            keyword, conclusion = item.split("：", 1)
+        elif ":" in item:
+            keyword, conclusion = item.split(":", 1)
+        else:
+            raise ValueError("judgment needs a keyword and a conclusion, separated by ：")
+    else:
+        raise ValueError("judgment line must be text or a (keyword, conclusion) pair")
+    keyword = _fit_line(keyword, COMPARE_KEYWORD_WORD_CAP, "judgment keyword")
+    conclusion = _fit_line(conclusion, COMPARE_JUDGMENT_WORD_CAP, "judgment conclusion")
+    try:
+        _budget([keyword, conclusion], COMPARE_JUDGMENT_WORD_CAP, "judgment line")
+    except ValueError as exc:
+        raise ValueError(str(exc) + " " + _SPLIT_HINT) from None
+    return keyword, conclusion
+
+
+def _judgment_items(judgment):
+    if isinstance(judgment, (str, tuple)):
+        items = [judgment]
+    elif isinstance(judgment, list):
+        items = list(judgment)
+    else:
+        raise ValueError("judgment must be 1 or 2 lines")
+    if not 1 <= len(items) <= COMPARE_MAX_JUDGMENT_LINES:
+        raise ValueError(
+            "judgment must be 1 or 2 lines. Split the synthesis onto the next slide at 20pt."
+        )
+    return [_one_judgment(item) for item in items]
+
+
+def _column_fields(column, index):
+    if isinstance(column, dict) and "title" in column and isinstance(column.get("fields"), dict):
+        title, fields = column["title"], column["fields"]
+    elif (
+        isinstance(column, (list, tuple))
+        and len(column) == 2
+        and isinstance(column[1], dict)
+    ):
+        title, fields = column
+    else:
+        raise ValueError("column %d must be {title, fields} or (title, fields)" % index)
+    return title, fields
+
+
+def _normalize_compare(columns, labels, judgment):
+    if isinstance(columns, (str, bytes)) or not isinstance(columns, (list, tuple)):
+        raise ValueError(
+            "same-question compare takes 2 or 3 columns. "
+            "Split extra options onto the next slide at 20pt, and repeat the shared question."
+        )
+    if not COMPARE_MIN_COLUMNS <= len(columns) <= COMPARE_MAX_COLUMNS:
+        raise ValueError(
+            "same-question compare takes 2 or 3 columns; got %d. "
+            "Split extra options onto the next slide at 20pt, and repeat the shared question."
+            % len(columns)
+        )
+    parsed = []
+    for index, column in enumerate(columns, 1):
+        parsed.append(_column_fields(column, index))
+    if labels is None:
+        labels = list(parsed[0][1].keys())
+    elif isinstance(labels, (str, bytes)) or not isinstance(labels, (list, tuple)):
+        raise ValueError("labels must be the shared list, in one order")
+    else:
+        labels = list(labels)
+    if not COMPARE_MIN_LABELS <= len(labels) <= COMPARE_MAX_LABELS:
+        raise ValueError(
+            "same-question compare needs %d to %d shared labels; got %d. "
+            "Split extra dimensions onto the next slide at 20pt."
+            % (COMPARE_MIN_LABELS, COMPARE_MAX_LABELS, len(labels))
+        )
+    cleaned_labels = []
+    for label in labels:
+        text = _fit_line(label, COMPARE_LABEL_WORD_CAP, "label")
+        if text in cleaned_labels:
+            raise ValueError("labels must be unique and shared")
+        cleaned_labels.append(text)
+    n_columns = len(parsed)
+    header_cap = COMPARE_HEADER_WORD_CAP[n_columns]
+    body_cap = COMPARE_BODY_WORD_CAP[n_columns]
+    normalized = []
+    for index, (title, fields) in enumerate(parsed, 1):
+        title = _fit_line(title, header_cap, "column %d title" % index)
+        if list(fields.keys()) != cleaned_labels:
+            raise ValueError(
+                "column %d labels must be %s, in that order"
+                % (index, " / ".join(cleaned_labels))
+            )
+        body = []
+        for label in cleaned_labels:
+            body.append(_fit_line(fields[label], body_cap, "column %d field %s" % (index, label)))
+        normalized.append((title, body))
+    judgments = _judgment_items(judgment)
+    return cleaned_labels, normalized, judgments
+
+
+def _ruled_rect(slide, name, box, fill, line, api):
+    x, y, w, h = box
+    shape = slide.shapes.add_shape(
+        api["MSO_SHAPE"].RECTANGLE, api["Emu"](x), api["Emu"](y), api["Emu"](w), api["Emu"](h),
+    )
+    shape.name = name
+    _no_effects(shape, api)
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = _rgb(api, fill)
+    if line is None:
+        shape.line.fill.background()
+    else:
+        shape.line.color.rgb = _rgb(api, line)
+        shape.line.width = api["Pt"](COMPARE_FRAME_PT)
+    return shape
+
+
+def add_same_question(slide, title, columns, judgment, labels=None, scheme="accent", source=None, page=None):
+    """One question, two or three isomorphic columns, then a judgment.
+
+    Every column uses the same labels in the same order. The numbered bar is
+    the lecture accent unless ``scheme`` is ``ink`` or ``navy``. ``navy``
+    colors only these bars. Titles, field text, and the judgment keyword stay
+    on the lecture palette. Field text is one 20pt line; a longer line or a
+    fourth column raises instead of shrinking the type.
+
+    ``judgment`` is ``"关键词：结论"``, ``(keyword, conclusion)``, or a list
+    of one or two of those. The keyword is accent and the conclusion is ink.
+    """
+    _require_widescreen(slide)
+    if scheme not in COMPARE_SCHEMES:
+        raise ValueError("scheme must be accent, ink, or navy")
+    cleaned_labels, normalized, judgments = _normalize_compare(columns, labels, judgment)
+    metrics = compare_column_boxes(len(normalized), len(cleaned_labels), len(judgments))
+    add_title(slide, title)
+    api = _pptx()
+    bar = COMPARE_SCHEMES[scheme]["bar"]
+    frames = []
+    headers = []
+    label_boxes = []
+    body_boxes = []
+    for index, (column_title, bodies) in enumerate(normalized, 1):
+        column = metrics["columns"][index - 1]
+        frame = _ruled_rect(
+            slide, "compare-frame-%d" % index, column["frame"], WHITE, MUTED, api,
+        )
+        frames.append(frame)
+        header = _ruled_rect(
+            slide, "compare-header-%d" % index, column["header"], bar, None, api,
+        )
+        text_frame = header.text_frame
+        text_frame.word_wrap = False
+        _margins(text_frame, api, emu(0.12), emu(0.08), 0, 0)
+        _anchor(text_frame, api, "ctr")
+        _set_runs(
+            text_frame.paragraphs[0],
+            [("%d  %s" % (index, column_title), COMPARE_BAR_TEXT, True)],
+            COMPARE_HEADER_PT, api,
+        )
+        headers.append(header)
+        for field_index, (label, body) in enumerate(zip(cleaned_labels, bodies), 1):
+            field = metrics["fields"][field_index - 1]
+            label_box = _textbox(
+                slide, column["text_x"], field["label_y"], column["text_w"], field["label_h"],
+                api, name="compare-label-%d-%d" % (index, field_index),
+            )
+            _margins(label_box.text_frame, api, 0, 0, 0, 0)
+            _write_lines(label_box, [label], COMPARE_FIELD_PT, _rgb(api, INK), api, bold=True)
+            body_box = _textbox(
+                slide, column["text_x"], field["body_y"], column["text_w"], field["body_h"],
+                api, name="compare-body-%d-%d" % (index, field_index),
+            )
+            _margins(body_box.text_frame, api, 0, 0, 0, 0)
+            _write_lines(body_box, [body], COMPARE_FIELD_PT, _rgb(api, INK), api, bold=False)
+            label_boxes.append(label_box)
+            body_boxes.append(body_box)
+    judgment_boxes = []
+    for index, (keyword, conclusion) in enumerate(judgments, 1):
+        y = metrics["judgment_y"] + (index - 1) * (metrics["judgment_h"] + metrics["judgment_gap"])
+        box = _textbox(
+            slide, MARGIN_X, y, TEXT_W, metrics["judgment_h"], api,
+            name="compare-judgment-%d" % index,
+        )
+        _margins(box.text_frame, api, 0, 0, 0, 0)
+        _anchor(box.text_frame, api, "ctr")
+        _set_runs(
+            box.text_frame.paragraphs[0],
+            [(keyword + "：", ACCENT, True), (conclusion, INK, False)],
+            COMPARE_JUDGMENT_PT, api,
+        )
+        judgment_boxes.append(box)
+    if source is not None or page is not None:
+        add_footer(slide, source=source, page=page)
+    return {
+        "frames": frames,
+        "headers": headers,
+        "labels": label_boxes,
+        "bodies": body_boxes,
+        "judgments": judgment_boxes,
+    }
+
+
 def _png_chunk(tag, data):
     crc = zlib.crc32(tag + data) & 0xFFFFFFFF
     return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
@@ -676,7 +1086,7 @@ def _finish(slide, source, page, notes):
 
 
 def write_sample_deck(path):
-    """Nine anonymous slides. Every number is a placeholder, not a result."""
+    """Ten anonymous slides. Every number is a placeholder, not a result."""
     charts = _load("chart_helpers")
     appear = _load("appear")
     prs = new_deck()
@@ -765,6 +1175,24 @@ def write_sample_deck(path):
     )
     _finish(definition, "来源：现场定义，不是引文。", 8, "定义框是白底红线。术语和解释都可以选中修改。")
 
+    compare = add_blank_slide(prs)
+    add_same_question(
+        compare,
+        "同一个问题，三种示意做法",
+        [
+            {"title": "示意甲", "fields": {"输入": "占位短句甲", "输出": "占位短句乙", "局限": "不能当结果"}},
+            {"title": "示意乙", "fields": {"输入": "另一句占位", "输出": "仍是占位", "局限": "没有测量"}},
+            {"title": "示意丙", "fields": {"输入": "第三句占位", "输出": "第三句输出", "局限": "不可外推"}},
+        ],
+        [("示例判断", "三栏文字都是占位，不能当成检索或实验。")],
+        source="来源：手写占位，不是论文。",
+        page=9,
+    )
+    set_notes(
+        compare,
+        "示例页。三栏共用输入、输出、局限。栏内句子是占位，不是投影截图里的检索式或文献条数。默认栏条是讲义红，不是蓝。",
+    )
+
     build = add_blank_slide(prs)
     add_title(build, "单击后三行才到齐")
     lines = [
@@ -773,7 +1201,7 @@ def write_sample_deck(path):
         add_text(build, MARGIN_X, emu(4.70), TEXT_W, emu(0.50), "下半部这行最后出现", 20, INK, name="step-3"),
     ]
     appear.add_click_appear(build, lines, effect="appear", together=False)
-    _finish(build, "来源：演示单击，不是影片。", 9, "这三行是可选的单击出现，默认不要开。它不是视频，文字仍可编辑。")
+    _finish(build, "来源：演示单击，不是影片。", 10, "这三行是可选的单击出现，默认不要开。它不是视频，文字仍可编辑。")
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
