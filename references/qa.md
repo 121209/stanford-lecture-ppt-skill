@@ -44,7 +44,7 @@
 - [ ] 证据图有 Source。裁图仍保留坐标轴、图例、色条和 panel 字母。AI 图没有被写成论文原图，也没有用来仿造曲线或数值。
 - [ ] 纯文字页没有失控。目标是整稿无视觉页不超过 30%。论文精读的方法段和结果段几乎每页都要有图、表、公式或原生示意图。
 - [ ] 结果页屏幕上能看见这一页主题需要的关键数字、对照和各 panel 的读解，不只写在备注里。没有固定词数上限。装不下且会低于字号硬底或溢出时拆页。口径见 [屏幕密度](density.md)。
-- [ ] `python scripts/audit_pptx.py` 里的 `algorithm_page_missing_diagram`、`raw_latex_on_screen`、`office_math_missing_fallback`、`empty_lower_content_band`、`font_below_min`、`low_contrast_text` 都只记警告，退出码不变。退出码 0 只说明包能读完。出现前三条时仍然不能交付。默认不记 `onscreen_text_over_word_cap`；只有传入 `--word-cap N` 才按该词数警告（中文 2 字 = 1 词；不计页码和 ≤15pt 来源行；封面不计）。不传参时不要自己设 40 或 56。`font_below_min` 是页脚／来源带外小于 18pt 的可见正文；`low_contrast_text` 在形状有明确 sRGB 纯色填充时相对该填充计算，否则相对白底，低于 4.5:1 就警告，文字色 `#BFBFBF` 一律警告。`algorithm_page_missing_diagram` 只看标题里的概念词（方法、算法、架构、框架、流程），不看模型名，并且跳过封面和已经有表、图、带图片回退的公式或图示的页。`office_math_count` 用来确认 OMML 已写入，不能代替目视。
+- [ ] `python scripts/audit_pptx.py` 里的 `algorithm_page_missing_diagram`、`raw_latex_on_screen`、`office_math_missing_fallback`、`empty_lower_content_band`、`font_below_min`、`low_contrast_text` 都只记警告，退出码不变。退出码 0 只说明包能读完。出现前三条时仍然不能交付。默认不记 `onscreen_text_over_word_cap`；只有传入 `--word-cap N` 才按该词数警告（中文 2 字 = 1 词；不计页码和 ≤15pt 来源行；封面不计）。不传参时不要自己设 40 或 56。`font_below_min` 是页脚／来源带外小于 18pt 的可见正文；`low_contrast_text` 在形状有明确 sRGB 纯色填充时相对该填充计算，否则相对白底，低于 4.5:1 就警告，文字色 `#BFBFBF` 一律警告。填充上单独的 `a:alpha` 先叠到白底上再算；其他颜色变换仍相对白底。`algorithm_page_missing_diagram` 只看标题里的概念词（方法、算法、架构、框架、流程），不看模型名，并且跳过封面和已经有表、图、带图片回退的公式或图示的页。`office_math_count` 用来确认 OMML 已写入，不能代替目视。
 
 外部打分若单列方法页和公式页，期望是：方法或架构相关页至少有一页含自动形状或连接线；讲解含 λ(t) 的式子时，屏幕没有 LaTeX 源码，可以是 OMML 或数学图，不能把 ASCII 源码说成已经可编辑。本仓库的审计只给警告，不代替那份打分。
 

@@ -226,13 +226,63 @@ def contrast_on_white(hex_color):
     return contrast_ratio(hex_color, "FFFFFF")
 
 
-def _shape_fill(shape):
-    """Explicit sRGB solid fill on the shape, else white.
+def _fill_alpha(color):
+    """Opacity of one sRGB fill, or None when a transform is not applied.
 
-    A numbered bar paints its text on that fill. Text with no explicit shape
-    fill is still judged against the white slide.
+    A bare ``a:srgbClr`` is opaque. One ``a:alpha`` child is in thousandths of
+    a percent (100000 = 100%). Shade, tint, lumMod, and any other child are
+    left alone so the caller keeps the white slide.
     """
-    return _srgb(shape.find("p:spPr", NS)) or "FFFFFF"
+    children = [child for child in list(color) if isinstance(child.tag, str)]
+    if not children:
+        return 1.0
+    if len(children) != 1 or children[0].tag != tag("a", "alpha"):
+        return None
+    raw = children[0].get("val")
+    try:
+        thousandths = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if thousandths < 0 or thousandths > 100000:
+        return None
+    return thousandths / 100000.0
+
+
+def _composite_on_white(hex_color, alpha):
+    """Source-over of an sRGB color onto pure white. ``alpha`` is 0..1."""
+    if alpha >= 1.0:
+        return hex_color
+    if alpha <= 0.0:
+        return "FFFFFF"
+    channels = []
+    for start in (0, 2, 4):
+        source = int(hex_color[start:start + 2], 16)
+        mixed = int(round(source * alpha + 255 * (1.0 - alpha)))
+        channels.append("%02X" % max(0, min(255, mixed)))
+    return "".join(channels)
+
+
+def _shape_fill(shape):
+    """Visible sRGB fill behind the shape's text, else white.
+
+    A numbered bar paints its text on that fill. No explicit fill stays on the
+    white slide. ``a:alpha`` is composited over white first, so a fully
+    transparent black fill does not hide white text. Any other color transform
+    is not interpreted and also stays on white.
+    """
+    sp_pr = shape.find("p:spPr", NS)
+    if sp_pr is None:
+        return "FFFFFF"
+    color = sp_pr.find("a:solidFill/a:srgbClr", NS)
+    if color is None:
+        return "FFFFFF"
+    value = (color.get("val") or "").strip().upper()
+    if len(value) != 6 or any(char not in "0123456789ABCDEF" for char in value):
+        return "FFFFFF"
+    alpha = _fill_alpha(color)
+    if alpha is None:
+        return "FFFFFF"
+    return _composite_on_white(value, alpha)
 
 
 def _format_pt(value):
@@ -650,8 +700,10 @@ def audit(path, word_cap=None):
             "below this body floor and may warn. "
             "low_contrast_text warns when an explicit sRGB text color contrasts below 4.5:1 "
             "with that shape's explicit sRGB solid fill, or with white when the shape has no "
-            "explicit sRGB fill. Text color #BFBFBF always warns. Chart series colors are not "
-            "text. Inherited theme colors with no explicit sRGB are not judged. "
+            "explicit sRGB fill. A single a:alpha on the fill is composited over white first; "
+            "any other fill transform is not applied and the check uses white. Text color "
+            "#BFBFBF always warns. Chart series colors are not text. Inherited theme colors "
+            "with no explicit sRGB are not judged. "
             "These two warnings do not change the process exit code."
         ),
         "warnings": [],

@@ -1078,6 +1078,37 @@ class HelperTests(unittest.TestCase):
         self.assertGreaterEqual(audit.contrast_ratio('FFFFFF', 'C00000'), 4.5)
         self.assertGreaterEqual(audit.contrast_ratio('FFFFFF', '1F4E79'), 4.5)
         self.assertLess(audit.contrast_ratio('FFFFFF', 'FFFFFF'), 4.5)
+        self.assertEqual(audit._composite_on_white('000000', 0), 'FFFFFF')
+        self.assertEqual(audit._composite_on_white('000000', 0.5), '808080')
+        self.assertEqual(audit._composite_on_white('C00000', 1), 'C00000')
+
+        def tinted(number, text, text_color, fill_inner):
+            return (
+                '<p:sp>'
+                '<p:nvSpPr><p:cNvPr id="%d" name="bar"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+                '<p:spPr><a:xfrm><a:off x="700000" y="1600000"/>'
+                '<a:ext cx="4000000" cy="500000"/></a:xfrm>'
+                '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+                '<a:solidFill>%s</a:solidFill></p:spPr>'
+                '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="2000">'
+                '<a:solidFill><a:srgbClr val="%s"/></a:solidFill></a:rPr>'
+                '<a:t>%s</a:t></a:r></a:p></p:txBody></p:sp>'
+            ) % (number, fill_inner, text_color, text)
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'alpha.pptx'
+            write_raw_deck(path, [
+                tinted(2, '封面', '222222', '<a:srgbClr val="FFFFFF"/>'),
+                tinted(2, '白字全透明黑', 'FFFFFF', '<a:srgbClr val="000000"><a:alpha val="0"/></a:srgbClr>'),
+                tinted(2, '墨色全透明黑', '222222', '<a:srgbClr val="000000"><a:alpha val="0"/></a:srgbClr>'),
+                tinted(2, '白字不透明红', 'FFFFFF', '<a:srgbClr val="C00000"><a:alpha val="100000"/></a:srgbClr>'),
+                tinted(2, '白字未解释的变换', 'FFFFFF', '<a:srgbClr val="000000"><a:lumMod val="50000"/></a:srgbClr>'),
+            ])
+            alpha_report = audit.audit(path)
+        self.assertIn('low_contrast_text', codes(alpha_report['slides'][1]))
+        self.assertNotIn('low_contrast_text', codes(alpha_report['slides'][2]))
+        self.assertNotIn('low_contrast_text', codes(alpha_report['slides'][3]))
+        self.assertIn('low_contrast_text', codes(alpha_report['slides'][4]))
 
     def test_dfrac_fallback_keeps_omml_frac_and_png_is_transparent(self):
         from PIL import Image
